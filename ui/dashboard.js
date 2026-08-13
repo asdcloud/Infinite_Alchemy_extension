@@ -1274,7 +1274,7 @@ $('reset-all').addEventListener('click', async () => {
   const c = r.cleared || {};
   $('clear-msg').textContent = `已重置：軌跡 ${fmt(c.attempts)}、配方 ${fmt(c.knowledge)}、素材櫃 ${fmt(
     c.inventory
-  )}、帳號狀態 ${fmt(c.accountState)} 筆全部清掉。現在是全新狀態，可以去按「⟳ 更新」測試了。`;
+  )}、帳號狀態 ${fmt(c.accountState)}、目標 ${fmt(c.goals)} 筆全部清掉。現在是全新狀態，可以去按「⟳ 更新」測試了。`;
   localStorage.removeItem(ACCOUNT_PREF);
   await load();
 });

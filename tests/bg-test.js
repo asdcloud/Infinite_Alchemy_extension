@@ -234,6 +234,50 @@ check('沒有 tabId 的來源拿不到租約', res.r && res.r.granted === false,
 res = await send({ type: 'ia-cmd', cmd: 'feed-stats' }, dashSender);
 check('統計有累加', res.r && res.r.stats.polls >= 1 && res.r.stats.learned >= 3, JSON.stringify(res.r && res.r.stats));
 
+out.push('[目標]');
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+check('一開始沒有目標', res.r && res.r.ok && res.r.items.length === 0, JSON.stringify(res.r));
+
+res = await send({ type: 'ia-cmd', cmd: 'predict', action: 'combine', inputs: ['火', '風'] }, dashSender);
+check('還沒設成目標時 starred=false', res.r && res.r.starred === false, JSON.stringify(res.r));
+
+res = await send({ type: 'ia-cmd', cmd: 'goal-toggle', action: 'combine', inputs: ['火', '風'] }, dashSender);
+check('點☆會設成目標', res.r && res.r.ok && res.r.starred === true, JSON.stringify(res.r));
+check('主鍵跟配方表用的是同一把', res.r && res.r.key === 'combine:火|風', JSON.stringify(res.r));
+
+res = await send({ type: 'ia-cmd', cmd: 'predict', action: 'combine', inputs: ['風', '火'] }, dashSender);
+check('材料順序反過來也認得出已設為目標', res.r && res.r.starred === true, JSON.stringify(res.r));
+
+await new Promise((r) => setTimeout(r, 5)); // 錯開 addedAt，才測得出排序
+res = await send({ type: 'ia-cmd', cmd: 'goal-toggle', action: 'combine', inputs: ['溫泉', '雷'] }, dashSender);
+check('可以設第二個', res.r && res.r.starred === true, JSON.stringify(res.r));
+
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+let goals = (res.r && res.r.items) || [];
+check('清單有兩筆', goals.length === 2, JSON.stringify(goals.map((g) => g.key)));
+check('新設的排前面', goals[0].key === 'combine:溫泉|雷', JSON.stringify(goals.map((g) => g.key)));
+check(
+  '已知的那組會附上判定與產物',
+  goals[0].prediction.status === 'pray-only' && goals[0].prediction.result === '間歇泉',
+  JSON.stringify(goals[0].prediction)
+);
+check(
+  '沒人試過的那組是「尚無紀錄」',
+  goals[1].prediction.status === 'unknown' && !goals[1].prediction.result,
+  JSON.stringify(goals[1].prediction)
+);
+check('只存材料，不存結果', goals[1].result === undefined && Array.isArray(goals[1].inputs), JSON.stringify(goals[1]));
+
+res = await send({ type: 'ia-cmd', cmd: 'goal-toggle', action: 'combine', inputs: ['火', '風'] }, dashSender);
+check('再點一次就取消', res.r && res.r.starred === false, JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+check('清單剩一筆', res.r.items.length === 1, JSON.stringify(res.r.items.map((g) => g.key)));
+
+res = await send({ type: 'ia-cmd', cmd: 'goal-toggle', action: 'refine', inputs: ['火'] }, dashSender);
+check('萃取也能設成目標', res.r && res.r.ok && res.r.key === 'refine:火', JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'goal-toggle', action: 'combine', inputs: [] }, dashSender);
+check('沒材料就不收', res.r && res.r.ok === false, JSON.stringify(res.r));
+
 out.push('[完全重置]');
 const broadcasts = [];
 window.chrome.runtime.sendMessage = (m) => broadcasts.push(m);
@@ -245,6 +289,9 @@ check(
   res.r && res.r.ok && res.r.cleared.attempts === 8 && res.r.cleared.knowledge === 10 && res.r.cleared.inventory === 2,
   JSON.stringify(res.r)
 );
+check('目標也一起清掉', res.r && res.r.cleared.goals === 2, JSON.stringify(res.r && res.r.cleared));
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+check('重置後目標清單是空的', res.r && res.r.items.length === 0, JSON.stringify(res.r));
 check('有廣播 ia-reset 讓開著的頁面重載', broadcasts.some((m) => m && m.type === 'ia-reset'), JSON.stringify(broadcasts));
 
 out.push('[版本檢查]');

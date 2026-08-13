@@ -12,6 +12,10 @@ import {
   getAccountState,
   putAccountState,
   getKnowledge,
+  allGoals,
+  getGoal,
+  putGoal,
+  deleteGoal,
   wipeAll,
 } from './db.js';
 import {
@@ -665,6 +669,10 @@ async function handleCommand(msg) {
       return importPayload(msg.payload, msg.label);
     case 'predict':
       return doPredict(msg.action, msg.inputs);
+    case 'goal-toggle':
+      return toggleGoal(msg.action, msg.inputs);
+    case 'goals':
+      return listGoals();
     case 'feed-claim':
       // 只有拿到租約的分頁才輪詢；tabId 由訊息處理器從 sender 補上
       return { ok: true, granted: msg.tabId != null && claimFeedLease(msg.tabId) };
@@ -683,8 +691,38 @@ async function doPredict(action, inputs) {
   const act = action === 'refine' ? 'refine' : 'combine';
   const norm = normalizeInputs(act, inputs);
   if (!norm.length) return { ok: false, error: '請提供材料' };
-  const rec = await getKnowledge(recipeKey(act, norm));
-  return { ok: true, inputs: norm, action: act, prediction: predict(rec) };
+  const key = recipeKey(act, norm);
+  const rec = await getKnowledge(key);
+  // 順便回報有沒有被設成目標，浮層才不用為了畫那顆星星再問一次
+  const starred = !!(await getGoal(key));
+  return { ok: true, inputs: norm, action: act, prediction: predict(rec), starred };
+}
+
+// ── 目標：想試但還沒試的組合 ───────────────────────────
+//
+// 只存「哪一組材料」，結果不存——每次列出來時都用當下的共用配方表重算，
+// 這樣別人分享的配方匯進來以後，本來「尚無紀錄」的目標會自己變成有結果。
+async function toggleGoal(action, inputs) {
+  const act = action === 'refine' ? 'refine' : 'combine';
+  const norm = normalizeInputs(act, inputs);
+  if (!norm.length) return { ok: false, error: '請提供材料' };
+  const key = recipeKey(act, norm);
+  if (await getGoal(key)) {
+    await deleteGoal(key);
+    return { ok: true, starred: false, key };
+  }
+  await putGoal({ key, action: act, inputs: norm, addedAt: Date.now() });
+  return { ok: true, starred: true, key };
+}
+
+async function listGoals() {
+  const goals = await allGoals();
+  goals.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)); // 新設的排前面
+  const items = [];
+  for (const g of goals) {
+    items.push({ ...g, prediction: predict(await getKnowledge(g.key)) });
+  }
+  return { ok: true, items };
 }
 
 async function findGameTab() {
@@ -790,6 +828,7 @@ async function resetAll() {
       knowledge: counts.knowledge || 0,
       inventory: counts.inventory || 0,
       accountState: counts.accountState || 0,
+      goals: counts.goals || 0,
       meta: counts.meta || 0,
     },
   };

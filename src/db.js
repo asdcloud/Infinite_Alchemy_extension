@@ -3,16 +3,17 @@
 //
 // 資料分兩層：
 //   attempts / inventory / accountState  → 跟著帳號走（軌跡、持有物、金錢、體力）
-//   knowledge                            → 共用配方表（配方是世界的性質，不因帳號而異，
-//                                          只標記是誰、用哪個帳號煉出來的）
+//   knowledge / goals                    → 不分帳號（配方是世界的性質；「這組值得試」也是，
+//                                          切帳號不該讓待辦清單消失，也不必等第一次「更新」）
 
 const DB_NAME = 'ia-tracker';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'attempts';
 const META = 'meta';
 const KNOWLEDGE = 'knowledge';
 const INVENTORY = 'inventory';
 const ACCOUNT_STATE = 'accountState';
+const GOALS = 'goals';
 
 let dbPromise = null;
 
@@ -45,13 +46,26 @@ function openDB() {
       if (!db.objectStoreNames.contains(ACCOUNT_STATE)) {
         db.createObjectStore(ACCOUNT_STATE, { keyPath: 'accountId' });
       }
+      // v3：想試但還沒試的組合
+      if (!db.objectStoreNames.contains(GOALS)) {
+        db.createObjectStore(GOALS, { keyPath: 'key' });
+      }
       if (ev.oldVersion > 0 && ev.oldVersion < 2) {
         // 舊資料不動；配方表會在下次寫入或按「由軌跡重建配方表」時補起來
         const tx = req.transaction;
         tx.objectStore(META).put({ k: 'needsKnowledgeRebuild', v: true });
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // 儀表板還開著舊版連線時，service worker 那邊的升級會被擋住卡死。
+      // 收到通知就把自己這條關掉讓它過，下次要用時再重開。
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
@@ -158,6 +172,23 @@ export async function putAccountState(rec) {
   return wrap((await store(ACCOUNT_STATE, 'readwrite')).put(rec));
 }
 
+// ── goals（想試但還沒試的組合，不分帳號）───────────────
+export async function allGoals() {
+  return wrap((await store(GOALS)).getAll());
+}
+
+export async function getGoal(key) {
+  return wrap((await store(GOALS)).get(key));
+}
+
+export async function putGoal(rec) {
+  return wrap((await store(GOALS, 'readwrite')).put(rec));
+}
+
+export async function deleteGoal(key) {
+  return wrap((await store(GOALS, 'readwrite')).delete(key));
+}
+
 // ── meta ───────────────────────────────────────────────
 export async function getMeta(k, fallback = null) {
   const row = await wrap((await store(META)).get(k));
@@ -171,12 +202,12 @@ export async function setMeta(k, v) {
 // ── 完全重置 ───────────────────────────────────────────
 /**
  * 清掉每一個資料表，讓擴充套件回到剛安裝的狀態。
- * 軌跡、共用配方表、素材櫃、帳號狀態、帳號名冊、魔力基準全部一起清——
+ * 軌跡、共用配方表、素材櫃、帳號狀態、目標、帳號名冊、魔力基準全部一起清——
  * 只清一部分的話，測「全新帳號」會測不準。
  */
 export async function wipeAll() {
   const db = await openDB();
-  const names = [STORE, KNOWLEDGE, INVENTORY, ACCOUNT_STATE, META];
+  const names = [STORE, KNOWLEDGE, INVENTORY, ACCOUNT_STATE, GOALS, META];
   const tx = db.transaction(names, 'readwrite');
   const counts = {};
   for (const name of names) {

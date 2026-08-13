@@ -51,7 +51,41 @@ const CSS = `
 .verdict.bad  { color: #ffb0a3; border-color: #7a3226; background: rgba(226,112,95,.09); }
 .verdict.dim  { color: #b39c76; border-color: #3a2c1c; background: rgba(255,255,255,.02); }
 .verdict .res { color: #f7d183; font-weight: 600; }
+.verdict .line { display: flex; align-items: flex-start; gap: 6px; }
+.verdict .line span { flex: 1; }
 .sub { color: #806b4c; font-size: 11.5px; margin-top: 3px; }
+.star {
+  all: unset; flex: none; cursor: pointer; line-height: 1;
+  color: #6b5a3e; font-size: 14px; padding: 0 1px; border-radius: 4px;
+}
+.star:hover { color: #e0b155; }
+.star.on { color: #f7d183; }
+.star:focus-visible { outline: 1px solid #e0b155; }
+.goals { margin-top: 8px; }
+.goals .gh {
+  display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none;
+  color: #b39c76; font-size: 11.5px; padding: 3px 0;
+}
+.goals .gh:hover { color: #f2e6cf; }
+.goals .caret { display: inline-block; width: 9px; }
+.goals ul { margin: 2px 0 0; padding: 0; list-style: none; max-height: 176px; overflow-y: auto; }
+.goals li {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 5px 0; border-top: 1px solid rgba(74,57,37,.4); font-size: 12px;
+}
+.goals li:first-child { border-top: none; }
+.goals li .what { flex: 1; min-width: 0; }
+.goals li .gm { display: block; color: #f2e6cf; }
+.goals li .say { color: #b39c76; font-size: 11.5px; }
+.goals li .say .res { color: #f7d183; }
+.goals li .say.ok { color: #a9e6b4; }
+.goals li .say.pray { color: #c9b4ff; }
+.goals li .say.bad { color: #ffb0a3; }
+.goals .del {
+  all: unset; flex: none; cursor: pointer; color: #6b5a3e; font-size: 12px; padding: 0 2px; border-radius: 4px;
+}
+.goals .del:hover { color: #ffb0a3; }
+.goals .empty { color: #806b4c; font-size: 11.5px; padding: 5px 0; }
 .mats { display: flex; align-items: center; gap: 5px; margin-bottom: 7px; }
 .mats input {
   all: unset; flex: 1; min-width: 0; background: #1c1610; border: 1px solid #4a3925;
@@ -114,6 +148,10 @@ export function mountOverlay(ctx) {
         <input class="ma" placeholder="材料 A" /><span class="op">＋</span><input class="mb" placeholder="材料 B" />
       </div>
       <div class="verdict dim">在遊戲裡點材料，這裡就會顯示結果</div>
+      <div class="goals">
+        <div class="gh"><span class="caret">▸</span><span class="gt">目標</span></div>
+        <ul class="glist hide"></ul>
+      </div>
       <div class="prog hide"><span class="ptext"></span><span class="bar"><i></i></span></div>
       <div class="upd hide"><button class="updbtn"></button></div>
       <div class="feed">
@@ -134,6 +172,10 @@ export function mountOverlay(ctx) {
     ptext: $('.ptext'),
     bar: $('.bar i'),
     fold: $('.fold'),
+    goalHead: $('.gh'),
+    goalCaret: $('.caret'),
+    goalTitle: $('.gt'),
+    goalList: $('.glist'),
     upd: $('.upd'),
     updBtn: $('.updbtn'),
     feedBox: $('.fd'),
@@ -143,9 +185,10 @@ export function mountOverlay(ctx) {
 
   let lastDetected = null; // 上一次從遊戲讀到的組合（null＝還沒讀到過煉製台）
 
-  // ── 收合狀態 ──
-  chrome.storage?.local?.get?.(['overlayCollapsed'], (v) => {
+  // ── 收合狀態（浮層本身、目標清單各記各的；目標預設收合）──
+  chrome.storage?.local?.get?.(['overlayCollapsed', 'goalsOpen'], (v) => {
     if (v && v.overlayCollapsed) setCollapsed(true);
+    if (v && v.goalsOpen) setGoalsOpen(true, false); // 讀回來的不用再寫回去
   });
   function setCollapsed(on) {
     wrap.classList.toggle('collapsed', on);
@@ -184,6 +227,7 @@ export function mountOverlay(ctx) {
       els.ptext.textContent = `更新完成：素材櫃 ${s.discoveries ?? 0} 種、軌跡 +${
         (s.logAdded ?? 0) + (s.myRecipesAdded ?? 0)
       }、配方表 +${s.learned ?? 0}`;
+      refreshGoals(); // 配方表剛長大，目標的結果可能從「尚無紀錄」變成有答案
       setTimeout(() => els.prog.classList.add('hide'), 6000);
     } else if (p.phase === 'error') {
       els.ptext.textContent = `同步失敗：${p.error || '未知錯誤'}`;
@@ -193,6 +237,103 @@ export function mountOverlay(ctx) {
       els.ptext.textContent = `${p.label || '同步中'}${p.total ? `（${p.done}/${p.total}）` : ''}`;
     }
   });
+
+  // ── 目標：想試但還沒魔力試的組合 ──
+  //
+  // 星星掛在判定那一行的最右邊，點亮就是「等一下要試這組」。
+  // 清單只存材料，結果每次展開都用當下的共用配方表重算——
+  // 匯入別人的配方之後，本來「尚無紀錄」的目標會自己變成有結果。
+  function makeStar(action, words, on) {
+    const b = document.createElement('button');
+    b.className = `star${on ? ' on' : ''}`;
+    b.textContent = on ? '★' : '☆';
+    b.title = on ? '已設為目標，點一下取消' : '設為目標：之後想試這一組';
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goal-toggle', action, inputs: words });
+      if (!r || !r.ok) return;
+      b.classList.toggle('on', r.starred);
+      b.textContent = r.starred ? '★' : '☆';
+      b.title = r.starred ? '已設為目標，點一下取消' : '設為目標：之後想試這一組';
+      b.setAttribute('aria-pressed', r.starred ? 'true' : 'false');
+      refreshGoals();
+    });
+    return b;
+  }
+
+  function goalLine(g) {
+    const li = document.createElement('li');
+    const what = document.createElement('div');
+    what.className = 'what';
+
+    const mats = document.createElement('span');
+    mats.className = 'gm';
+    mats.textContent = g.inputs.join(' ＋ ');
+    what.appendChild(mats);
+
+    const v = VERDICT[g.prediction.status] || VERDICT.unknown;
+    const say = document.createElement('span');
+    say.className = `say ${v.tone === 'dim' ? '' : v.tone}`.trim();
+    say.textContent = `${v.icon} ${g.action === 'refine' ? '萃取・' : ''}${v.text}`;
+    if (g.prediction.result) {
+      const res = document.createElement('span');
+      res.className = 'res';
+      res.textContent = ` → ${g.prediction.emoji ? g.prediction.emoji + ' ' : ''}${g.prediction.result}`;
+      say.appendChild(res);
+    }
+    what.appendChild(say);
+    li.appendChild(what);
+
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = '✕';
+    del.title = '從目標移除';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goal-toggle', action: g.action, inputs: g.inputs });
+      refreshGoals();
+      // 移掉的正好是現在選著的那組，星星要跟著暗下去
+      const cur = [els.ma.value.trim(), els.mb.value.trim()].filter(Boolean);
+      if (cur.join('|') === g.inputs.join('|')) evaluate(cur);
+    });
+    li.appendChild(del);
+    return li;
+  }
+
+  async function refreshGoals() {
+    const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goals' });
+    const items = (r && r.ok && r.items) || [];
+    els.goalTitle.textContent = items.length ? `目標（${items.length}）` : '目標';
+    if (els.goalList.classList.contains('hide')) return; // 收合著就不用畫清單
+    els.goalList.textContent = '';
+    if (!items.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = '還沒有。在判定那一行點☆，就會記到這裡。';
+      els.goalList.appendChild(li);
+      return;
+    }
+    for (const g of items) els.goalList.appendChild(goalLine(g));
+  }
+
+  function setGoalsOpen(open, persist = true) {
+    els.goalList.classList.toggle('hide', !open);
+    els.goalCaret.textContent = open ? '▾' : '▸';
+    if (persist) {
+      try {
+        chrome.storage.local.set({ goalsOpen: open });
+      } catch (_) {
+        /* 記不住展開狀態也無所謂 */
+      }
+    }
+    if (open) refreshGoals();
+  }
+  els.goalHead.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setGoalsOpen(els.goalList.classList.contains('hide'));
+  });
+  refreshGoals(); // 收合著也要先數一次，標題才顯示得出有幾個
 
   // ── 有新版本時浮出來的那顆 ──
   // 按下去就開 GitHub 的發布頁，要不要更新自己決定
@@ -272,13 +413,17 @@ export function mountOverlay(ctx) {
     els.mb.classList.toggle('auto', !!words[1]);
   }
 
-  function showVerdict(pred, action) {
+  function showVerdict(pred, action, words, starred) {
     const v = VERDICT[pred.status] || VERDICT.unknown;
     els.verdict.className = `verdict ${v.tone}`;
     els.verdict.textContent = '';
     const line = document.createElement('div');
+    line.className = 'line';
+    const text = document.createElement('span');
     // 只放一樣材料時遊戲那顆按鈕會變成「萃取」，這裡也標出來，免得看成煉成的結果
-    line.textContent = `${v.icon} ${action === 'refine' ? '萃取：' : ''}${v.text}`;
+    text.textContent = `${v.icon} ${action === 'refine' ? '萃取：' : ''}${v.text}`;
+    line.appendChild(text);
+    line.appendChild(makeStar(action, words, starred));
     els.verdict.appendChild(line);
 
     if (pred.result && (pred.status === 'success' || pred.status === 'pray-only' || pred.status === 'pray-known')) {
@@ -313,7 +458,7 @@ export function mountOverlay(ctx) {
     }
     const action = words.length === 1 ? 'refine' : 'combine';
     const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'predict', action, inputs: words });
-    if (r && r.ok) showVerdict(r.prediction, action);
+    if (r && r.ok) showVerdict(r.prediction, action, r.inputs || words, r.starred);
   }
 
   // 只在「遊戲那邊真的變了」時才動輸入框，否則自己打到一半的字會被擦掉

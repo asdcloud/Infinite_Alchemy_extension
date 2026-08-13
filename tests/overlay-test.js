@@ -25,12 +25,20 @@ window.chrome = {
   },
 };
 
+// 假的目標表：key → { action, inputs }
+const goals = new Map();
+const keyOf = (action, inputs) =>
+  action === 'refine' ? `refine:${inputs[0]}` : `combine:${[...inputs].sort().join('|')}`;
+
 const ctx = {
   async sendAsync(m) {
     cmds.push(m);
     if (m.cmd === 'predict') {
       return {
         ok: true,
+        inputs: m.inputs,
+        action: m.action,
+        starred: goals.has(keyOf(m.action, m.inputs)),
         prediction: {
           status: 'pray-only',
           result: '殭屍',
@@ -40,6 +48,27 @@ const ctx = {
           discoveredBy: { finderName: '鮭魚二號機' },
         },
       };
+    }
+    if (m.cmd === 'goal-toggle') {
+      const key = keyOf(m.action, m.inputs);
+      if (goals.has(key)) {
+        goals.delete(key);
+        return { ok: true, starred: false, key };
+      }
+      goals.set(key, { key, action: m.action, inputs: m.inputs, addedAt: goals.size + 1 });
+      return { ok: true, starred: true, key };
+    }
+    if (m.cmd === 'goals') {
+      const items = [...goals.values()]
+        .sort((a, b) => b.addedAt - a.addedAt)
+        .map((g) => ({
+          ...g,
+          prediction:
+            g.inputs[0] === '水'
+              ? { status: 'unknown', result: null, emoji: null }
+              : { status: 'success', result: '殭屍', emoji: '🧟' },
+        }));
+      return { ok: true, items };
     }
     return { ok: true };
   },
@@ -149,11 +178,72 @@ await settle();
 check('不會把你打的字擦掉', $('.ma').value === '土', $('.ma').value);
 
 // ── 全服動態收集開關 ──
+out.push('[目標：判定那一行的星星]');
+$('.ma').value = '';
+$('.mb').value = '';
+$('.ma').dispatchEvent(new Event('input'));
+await wait(400);
+check('沒選材料時判定列裡沒有星星', $('.verdict .star') === null, $('.verdict').textContent);
+$('.ma').value = '融合怪獸';
+$('.mb').value = '不死者';
+$('.ma').dispatchEvent(new Event('input'));
+await wait(400);
+const star = () => $('.verdict .star');
+check('有結果時星星出現在判定那一行最右邊', !!star() && star().parentElement.classList.contains('line'));
+check('預設是暗的', !star().classList.contains('on') && star().textContent === '☆');
+check('目標清單預設收合', $('.glist').classList.contains('hide'));
+check('標題本來只寫「目標」', $('.gt').textContent === '目標', $('.gt').textContent);
+
+star().click();
+await wait(60);
+check('點下去會點亮', star().classList.contains('on') && star().textContent === '★');
+check('送出的是 goal-toggle',
+  cmds.some((m) => m.cmd === 'goal-toggle' && m.inputs.join('|') === '融合怪獸|不死者'), JSON.stringify(cmds.slice(-3)));
+check('標題跟著寫出數量', $('.gt').textContent === '目標（1）', $('.gt').textContent);
+check('收合狀態不受影響', $('.glist').classList.contains('hide'));
+
+// 換一組再設一個
+$('.ma').value = '水';
+$('.mb').value = '火';
+$('.ma').dispatchEvent(new Event('input'));
+await wait(400);
+check('換一組之後星星回到暗的', !star().classList.contains('on'), star().textContent);
+star().click();
+await wait(60);
+check('第二個也設得起來', $('.gt').textContent === '目標（2）', $('.gt').textContent);
+
+out.push('[目標：展開的清單]');
+$('.gh').click();
+await wait(60);
+check('點標題就展開', !$('.glist').classList.contains('hide'));
+check('展開狀態有記起來', storageValue.goalsOpen === true, JSON.stringify(storageValue));
+check('兩筆都在', $('.glist').querySelectorAll('li').length === 2, String($('.glist').querySelectorAll('li').length));
+const rows = [...$('.glist').querySelectorAll('li')];
+check('新設的排前面', rows[0].querySelector('.gm').textContent === '水 ＋ 火', rows[0].querySelector('.gm').textContent);
+check('未知的那組寫「尚無紀錄」', rows[0].querySelector('.say').textContent.includes('尚無紀錄'), rows[0].querySelector('.say').textContent);
+check('已知的那組寫得出產物', rows[1].querySelector('.say').textContent.includes('殭屍'), rows[1].querySelector('.say').textContent);
+
+check('目前選著的那組（水＋火）星星是亮的', star().classList.contains('on'));
+rows[0].querySelector('.del').click();
+await wait(400);
+check('✕ 會把那筆移掉', $('.glist').querySelectorAll('li').length === 1, String($('.glist').querySelectorAll('li').length));
+check('移掉的正好是選著的那組，星星跟著暗下去', !star().classList.contains('on'), star().textContent);
+
+rows[1].querySelector('.del') && $('.glist').querySelector('.del').click();
+await wait(60);
+check('全部移掉後顯示空狀態', $('.glist').querySelector('.empty') !== null, $('.glist').textContent);
+check('標題也回到只寫「目標」', $('.gt').textContent === '目標', $('.gt').textContent);
+
+$('.gh').click();
+await wait(20);
+check('再點一次收回去', $('.glist').classList.contains('hide') && storageValue.goalsOpen === false);
+
 out.push('[全服動態開關]');
 check('開關在浮層裡', !!$('.fd'));
 check('預設是關的', $('.fd').checked === false);
 check('文字寫「關閉」', $('.st').textContent === '關閉', $('.st').textContent);
-check('沒設定過就不會亂寫 storage', writes.length === 0, JSON.stringify(writes));
+const feedWrites = () => writes.filter((w) => 'globalFeed' in w);
+check('沒設定過就不會亂寫 storage', feedWrites().length === 0, JSON.stringify(writes));
 
 $('.lbl').click();
 await wait(20);
@@ -202,11 +292,17 @@ check('不會順便把浮層收起來', !$('.wrap').classList.contains('collapse
 // ── 重開分頁：storage 裡已經是開的 ──
 out.push('[重開分頁時讀回設定]');
 document.getElementById(HOST).remove();
-storageValue = { globalFeed: true };
+storageValue = { globalFeed: true, goalsOpen: true };
+goals.set('combine:水|火', { key: 'combine:水|火', action: 'combine', inputs: ['水', '火'], addedAt: 1 });
+const writesAtRemount = writes.length;
 mountOverlay(ctx);
-await wait(120);
+await wait(150);
 root = document.getElementById(HOST).shadowRoot;
 check('掛載時就照 storage 顯示為開啟', $('.fd').checked === true && $('.st').textContent === '開啟中', $('.st').textContent);
+check('目標展開狀態也讀得回來', !$('.glist').classList.contains('hide'));
+check('讀回來的狀態不會再寫回 storage', writes.length === writesAtRemount, JSON.stringify(writes.slice(writesAtRemount)));
+check('展開時就把清單畫出來', $('.glist').querySelectorAll('li').length === 1, String($('.glist').querySelectorAll('li').length));
+check('標題帶著數量', $('.gt').textContent === '目標（1）', $('.gt').textContent);
 
 out.unshift(fail === 0 ? `RESULT: ALL PASS (${pass})` : `RESULT: ${fail} FAILED / ${pass} passed`);
 o.textContent = out.join('\n');

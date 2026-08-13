@@ -166,6 +166,7 @@ export async function wipeAll() {
     knowledge: KNOWLEDGE.length,
     inventory: Object.keys(INV).length,
     accountState: Object.keys(STATE).length,
+    goals: GOALS.size,
     meta: 3,
   };
   // 真的清掉，之後 allAttempts() 才會回傳空的——不然測不出重置的效果
@@ -173,6 +174,7 @@ export async function wipeAll() {
   KNOWLEDGE.length = 0;
   for (const k of Object.keys(INV)) delete INV[k];
   for (const k of Object.keys(STATE)) delete STATE[k];
+  GOALS.clear();
   META.clear();
   window.__iaWiped.push(counts);
   return counts;
@@ -188,3 +190,18 @@ export async function upsertKnowledgeBatch(entries) {
 export async function getKnowledge(key) { return KNOWLEDGE.find((k) => k.key === key) || undefined; }
 export async function putInventory() {}
 export async function putAccountState() {}
+
+// goals 也要真的來回讀寫，星星點亮／取消才測得出來
+const GOALS = new Map();
+export async function allGoals() {
+  return [...GOALS.values()];
+}
+export async function getGoal(key) {
+  return GOALS.get(key);
+}
+export async function putGoal(rec) {
+  GOALS.set(rec.key, rec);
+}
+export async function deleteGoal(key) {
+  GOALS.delete(key);
+}
