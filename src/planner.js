@@ -177,6 +177,9 @@ export function plan(target, owned, byResult, mode = 'steps') {
     for (const [word, recipe] of [...remaining]) {
       if (recipe.inputs.every((i) => have.has(i))) {
         steps.push({
+          // key 一定要帶：畫路徑樹的人要靠它認出「這一步用的是哪一條配方」，
+          // 少了它樹就只能照全域最短深度自己挑，跟這裡算出來的路徑對不起來
+          key: recipe.key,
           action: recipe.action,
           inputs: recipe.inputs,
           result: word,

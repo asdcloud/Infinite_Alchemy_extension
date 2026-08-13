@@ -286,7 +286,7 @@ check('重置有回覆', res.replied === true, JSON.stringify(res));
 check('每個資料表都清了', window.__iaWiped.length === 1, JSON.stringify(window.__iaWiped));
 check(
   '回報清掉的筆數',
-  res.r && res.r.ok && res.r.cleared.attempts === 8 && res.r.cleared.knowledge === 10 && res.r.cleared.inventory === 2,
+  res.r && res.r.ok && res.r.cleared.attempts === 8 && res.r.cleared.knowledge === 13 && res.r.cleared.inventory === 2,
   JSON.stringify(res.r)
 );
 check('目標也一起清掉', res.r && res.r.cleared.goals === 2, JSON.stringify(res.r && res.r.cleared));

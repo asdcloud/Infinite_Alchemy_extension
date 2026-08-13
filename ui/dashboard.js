@@ -262,6 +262,9 @@ function renderAll() {
   renderSuggest();
   renderBag();
   renderFeed();
+  renderPlanBasis();
+  // 資料變了，正在看的那條路徑也要跟著重算，否則按「重新整理」在這一頁看起來像沒反應
+  if (state.planTarget) renderPlan(state.planTarget);
 }
 
 // ── 軌跡 ────────────────────────────────────────────────
@@ -567,6 +570,7 @@ function stepsFromTree(tree) {
   const needed = new Map(); // word → recipe
   const missing = new Set();
   const usedOwned = new Set();
+  const cycles = new Set(); // 要用到自己才煉得出自己的造物
   (function walk(n) {
     if (n.kind === 'owned' || (n.kind === 'primordial' && !n.recipe)) {
       usedOwned.add(n.word);
@@ -576,7 +580,11 @@ function stepsFromTree(tree) {
       missing.add(n.word);
       return;
     }
-    if (!n.recipe || n.cycle) return;
+    if (n.cycle) {
+      cycles.add(n.word);
+      return;
+    }
+    if (!n.recipe) return;
     needed.set(n.word, n.recipe);
     n.children.forEach(walk);
   })(tree);
@@ -598,7 +606,7 @@ function stepsFromTree(tree) {
     if (!moved) break;
   }
   for (const [word, recipe] of left) steps.push({ ...recipe, result: word, unresolved: true });
-  return { steps, missing: [...missing], usedOwned: [...usedOwned] };
+  return { steps, missing: [...missing], usedOwned: [...usedOwned], cycles: [...cycles] };
 }
 
 function renderPlanBasis() {
@@ -667,17 +675,23 @@ function renderPlan(target) {
   }
 
   const tree = buildTree(target, state.recipes, bestFor, { stopAt: state.owned });
-  const { steps, missing, usedOwned } = stepsFromTree(tree);
+  const { steps, missing, usedOwned, cycles } = stepsFromTree(tree);
   const picked = state.treePick.size > 0;
   const needsPray = steps.some((s) => s.needsPray);
+  // 有循環（要用到自己才煉得出自己）或排不出順序，這條路就是照著做不出來的，
+  // 不能還印成「N 步」——那會叫人照著一份根本走不通的順序去花魔力。
+  const stuck = steps.filter((s) => s.unresolved).map((s) => s.result);
+  const blocked = cycles.length > 0 || stuck.length > 0;
 
-  const head = el('div', { class: `verdict-box ${missing.length ? 'pray' : 'ok'}` });
+  const head = el('div', { class: `verdict-box ${blocked ? 'bad' : missing.length ? 'pray' : 'ok'}` });
   head.appendChild(
     el('div', {
       class: 'big',
-      text: missing.length
-        ? `${steps.length} 步，但缺 ${missing.length} 樣材料`
-        : `${steps.length} 步就能煉出「${wordLabel(target)}」`,
+      text: blocked
+        ? `這條路走不通`
+        : missing.length
+          ? `${steps.length} 步，但缺 ${missing.length} 樣材料`
+          : `${steps.length} 步就能煉出「${wordLabel(target)}」`,
     })
   );
   head.appendChild(
@@ -688,8 +702,28 @@ function renderPlan(target) {
       } 種材料${needsPray ? '・路徑中有需要祈禱的步驟' : ''}`,
     })
   );
+  if (cycles.length) {
+    head.appendChild(
+      el('div', {
+        text: `${cycles.map(wordLabel).join('、')} 要先有自己才煉得出自己（互相循環）——樹上標「循環，已截斷」的就是這裡。`,
+      })
+    );
+  }
+  if (stuck.length) {
+    head.appendChild(el('div', { text: `排不出順序：${stuck.map(wordLabel).join('、')}——材料要靠它自己（或後面的步驟）才生得出來。` }));
+  }
+  if (blocked) {
+    head.appendChild(
+      el('div', {
+        class: 'sub muted',
+        text: picked
+          ? '換一條配方看看，或按下面的「↺ 回到自動選的路徑」。'
+          : '樹上有多條配方的節點可以點「另有 N 條配方 ⇄」換一條試試。',
+      })
+    );
+  }
   if (missing.length) {
-    head.appendChild(el('div', { text: `缺少：${missing.join('、')}（要去市集買，或還沒有人發現配方）` }));
+    head.appendChild(el('div', { text: `缺少：${missing.map(wordLabel).join('、')}（要去市集買，或還沒有人發現配方）` }));
   }
   if (picked) {
     head.appendChild(
@@ -708,9 +742,15 @@ function renderPlan(target) {
   box.appendChild(head);
 
   const ol = el('ul', { class: 'steps' });
+  if (blocked) {
+    // 這種時候編號會誤導人，所以講明白：下面只是這條路用到的配方，不是可以照做的順序
+    box.appendChild(
+      el('p', { class: 'muted', text: '下面是這條路用到的配方，但因為上面說的原因排不成可以照做的順序：' })
+    );
+  }
   steps.forEach((s, i) => {
     const li = el('li');
-    li.appendChild(el('span', { class: 'no', text: `${i + 1}.` }));
+    li.appendChild(el('span', { class: 'no', text: blocked ? '・' : `${i + 1}.` }));
     const line = el('span');
     if (s.action === 'refine') {
       line.appendChild(el('span', { class: 'tag refine', text: '萃取' }));
@@ -1122,15 +1162,32 @@ $('tabs').addEventListener('click', (e) => {
   if (tab) switchView(tab.dataset.view);
 });
 
-$('reload').addEventListener('click', load);
+// 重新整理：重讀資料庫再重畫。資料通常沒變，所以一定要給回饋，
+// 不然按下去畫面一模一樣，會以為這顆按鈕壞了。
+$('reload').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const label = btn.dataset.label || btn.textContent;
+  btn.dataset.label = label;
+  btn.disabled = true;
+  btn.textContent = '重新整理中…';
+  try {
+    await load();
+    btn.textContent = '已重新整理';
+  } catch (err) {
+    btn.textContent = '重新整理失敗';
+  }
+  setTimeout(() => {
+    btn.textContent = label;
+    btn.disabled = false;
+  }, 1200);
+});
 
 $('account-select').addEventListener('change', async (e) => {
   state.account = e.target.value;
   localStorage.setItem(ACCOUNT_PREF, state.account);
   await applyAccountFilter();
   buildKnowledgeViews(); // 素材櫃換了，造物樣貌也要跟著重建
-  renderAll();
-  renderPlanBasis();
+  renderAll(); // 裡面已經包含 renderPlanBasis 與重畫路徑
 });
 
 // 更新（同步）
@@ -1288,7 +1345,6 @@ setInterval(async () => {
 // 網址帶 ?plan=xxx（或舊的 ?word=xxx）直接查那個造物怎麼煉
 const params = new URLSearchParams(location.search);
 load().then(() => {
-  renderPlanBasis();
   const t = params.get('plan') || params.get('word');
   if (t) {
     switchView('plan');

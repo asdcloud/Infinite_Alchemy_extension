@@ -76,6 +76,11 @@ const KNOWLEDGE = [
   mkK('combine', ['水', '雷'], null, { normal: arm('fail', 0, 3) }),
   // 同一個造物的第二條配方，來源沒帶 emoji——不該在畫面上長得不一樣
   mkK('combine', ['雲', '火'], '蒸氣', { by: '別人', byId: null, src: 'sync' }),
+  // 互相循環：遊戲王要卡片＋決鬥，決鬥又要對戰＋遊戲王。
+  // 真實的配方表就有這種東西，步驟表不能把它印成「照這個順序做」。
+  mkK('combine', ['卡片', '決鬥'], '遊戲王', { emoji: '🃏', by: '蟲惑魔的肥料', byId: null, src: 'sync' }),
+  mkK('combine', ['對戰', '遊戲王'], '決鬥', { emoji: '⚔️', by: '鱈魚二號機', byId: null, src: 'sync' }),
+  mkK('combine', ['卡', '卡'], '卡片', { emoji: '🎴', by: '蟲惑魔的肥料', byId: null, src: 'sync' }),
 ];
 
 const INV = {

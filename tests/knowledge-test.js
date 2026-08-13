@@ -285,6 +285,14 @@ check('步驟順序合法（材料先於產物）', (() => {
   return have.has('地熱');
 })(), JSON.stringify(p1.steps.map((s) => s.result)));
 check('標出路徑中需要祈禱的步驟', p1.needsPray === true);
+// 每一步都要帶 key，路徑樹才認得出「這一步用的是哪一條配方」。
+// 少了它，樹只能照全域最短深度自己挑，畫出來的路徑就跟步驟表對不起來。
+check('每一步都帶著配方 key', p1.steps.every((s) => !!s.key), JSON.stringify(p1.steps.map((s) => s.key)));
+check(
+  'key 對得回共用配方表裡的那一條',
+  p1.steps.every((s) => (byResult.get(s.result) || []).some((r) => r.key === s.key)),
+  JSON.stringify(p1.steps.map((s) => [s.result, s.key]))
+);
 
 const p2 = plan('海', owned, byResult, 'steps');
 check('水＋水→海 只要 1 步', p2.stepCount === 1 && p2.ok, JSON.stringify(p2));
