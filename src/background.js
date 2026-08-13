@@ -228,11 +228,15 @@ async function handleAttempt(ev) {
   // 配方是全域知識，不分帳號；只記下是誰煉出來的
   await upsertKnowledgeBatch([fromAttempt(record, SOURCE.LOCAL)]);
   // 煉成的造物會進素材櫃
+  let pathTicked = 0;
   if (outcome === 'success' && record.result) {
     await addToInventory(account.id, [{ word: record.result, emoji: record.emoji, type: record.type, rarity: record.rarity, value: record.value }], ev.ts);
+    // 你真的照著待煉路徑煉了這一步 → 自動把它從清單上拿掉
+    const ticked = await tickPathStep(recipeKey(record.action, normalizeInputs(record.action, inputs)));
+    pathTicked = ticked.changed;
   }
   refreshBadge(await bumpToday(record.ts, record.accountId));
-  return { ok: true };
+  return { ok: true, pathTicked };
 }
 
 // ── 持有物 ─────────────────────────────────────────────
@@ -673,6 +677,12 @@ async function handleCommand(msg) {
       return toggleGoal(msg.action, msg.inputs);
     case 'goals':
       return listGoals();
+    case 'goal-path':
+      return saveGoalPath(msg.target, msg.steps);
+    case 'goal-step-done':
+      return tickPathStep(msg.stepKey);
+    case 'goal-remove':
+      return removeGoal(msg.key);
     case 'feed-claim':
       // 只有拿到租約的分頁才輪詢；tabId 由訊息處理器從 sender 補上
       return { ok: true, granted: msg.tabId != null && claimFeedLease(msg.tabId) };
@@ -717,12 +727,65 @@ async function toggleGoal(action, inputs) {
 
 async function listGoals() {
   const goals = await allGoals();
-  goals.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)); // 新設的排前面
+  goals.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)); // 新加的排前面
   const items = [];
   for (const g of goals) {
-    items.push({ ...g, prediction: predict(await getKnowledge(g.key)) });
+    if (g.kind === 'path') items.push(g);
+    else items.push({ ...g, prediction: predict(await getKnowledge(g.key)) });
   }
   return { ok: true, items };
+}
+
+/**
+ * 把「怎麼煉」算出來的整條路徑存進待煉清單。
+ * 同一個目標只留一條，重新規劃就覆蓋掉——不然同一個東西會存出好幾條互相矛盾的路。
+ */
+async function saveGoalPath(target, steps) {
+  if (!target || !Array.isArray(steps) || !steps.length) return { ok: false, error: '沒有可存的路徑' };
+  const key = `path:${target}`;
+  const prev = await getGoal(key);
+  await putGoal({
+    key,
+    kind: 'path',
+    target,
+    steps: steps.map((s) => ({
+      key: s.key,
+      action: s.action,
+      inputs: s.inputs,
+      result: s.result,
+      emoji: s.emoji ?? null,
+      needsPray: !!s.needsPray,
+    })),
+    addedAt: (prev && prev.addedAt) || Date.now(),
+    updatedAt: Date.now(),
+  });
+  return { ok: true, key, count: steps.length };
+}
+
+/**
+ * 某一步做完了就從路徑上拿掉，整條做完就把它清掉。
+ * 這是自動的（handleAttempt 煉成功時會呼叫），浮層上那顆 ✓ 是給
+ * 「擴充套件沒看到那一爐」時補的，不然那條會永遠卡著。
+ */
+async function tickPathStep(stepKey) {
+  if (!stepKey) return { ok: true, changed: 0 };
+  const goals = await allGoals();
+  let changed = 0;
+  for (const g of goals) {
+    if (g.kind !== 'path' || !Array.isArray(g.steps)) continue;
+    const left = g.steps.filter((s) => s.key !== stepKey);
+    if (left.length === g.steps.length) continue;
+    changed++;
+    if (left.length) await putGoal({ ...g, steps: left, updatedAt: Date.now() });
+    else await deleteGoal(g.key); // 整條煉完了
+  }
+  return { ok: true, changed };
+}
+
+async function removeGoal(key) {
+  if (!key) return { ok: false, error: '沒有指定要移除哪一筆' };
+  await deleteGoal(key);
+  return { ok: true };
 }
 
 async function findGameTab() {

@@ -86,6 +86,21 @@ const CSS = `
 }
 .goals .del:hover { color: #ffb0a3; }
 .goals .empty { color: #806b4c; font-size: 11.5px; padding: 5px 0; }
+.goals li.path .gm { color: #f7d183; }
+.goals .psteps { margin: 3px 0 0; padding: 0 0 0 2px; list-style: none; counter-reset: st; }
+.goals .psteps li {
+  display: flex; align-items: baseline; gap: 5px;
+  padding: 1px 0; border: none; font-size: 11.5px;
+}
+.goals .psteps li::before {
+  counter-increment: st; content: counter(st) "."; flex: none; width: 13px; color: #6b5a3e; font-size: 11px;
+}
+.goals .psteps .say { flex: 1; min-width: 0; }
+.goals .praytag { color: #c9b4ff; margin-left: 4px; }
+.goals .done {
+  all: unset; flex: none; cursor: pointer; color: #6b5a3e; font-size: 11px; padding: 0 2px; border-radius: 4px;
+}
+.goals .done:hover { color: #a9e6b4; }
 .mats { display: flex; align-items: center; gap: 5px; margin-bottom: 7px; }
 .mats input {
   all: unset; flex: 1; min-width: 0; background: #1c1610; border: 1px solid #4a3925;
@@ -149,7 +164,7 @@ export function mountOverlay(ctx) {
       </div>
       <div class="verdict dim">在遊戲裡點材料，這裡就會顯示結果</div>
       <div class="goals">
-        <div class="gh"><span class="caret">▸</span><span class="gt">目標</span></div>
+        <div class="gh"><span class="caret">▸</span><span class="gt">待煉</span></div>
         <ul class="glist hide"></ul>
       </div>
       <div class="prog hide"><span class="ptext"></span><span class="bar"><i></i></span></div>
@@ -185,7 +200,7 @@ export function mountOverlay(ctx) {
 
   let lastDetected = null; // 上一次從遊戲讀到的組合（null＝還沒讀到過煉製台）
 
-  // ── 收合狀態（浮層本身、目標清單各記各的；目標預設收合）──
+  // ── 收合狀態（浮層本身、待煉清單各記各的；待煉預設收合）──
   chrome.storage?.local?.get?.(['overlayCollapsed', 'goalsOpen'], (v) => {
     if (v && v.overlayCollapsed) setCollapsed(true);
     if (v && v.goalsOpen) setGoalsOpen(true, false); // 讀回來的不用再寫回去
@@ -229,7 +244,7 @@ export function mountOverlay(ctx) {
       els.ptext.textContent = `更新完成：素材櫃 ${s.discoveries ?? 0} 種、軌跡 +${
         (s.logAdded ?? 0) + (s.myRecipesAdded ?? 0)
       }、配方表 +${s.learned ?? 0}`;
-      refreshGoals(); // 配方表剛長大，目標的結果可能從「尚無紀錄」變成有答案
+      refreshGoals(); // 配方表剛長大，待煉項目的判定可能從「尚無紀錄」變成有答案
       setTimeout(() => els.prog.classList.add('hide'), 6000);
     } else if (p.phase === 'error') {
       els.ptext.textContent = `同步失敗：${p.error || '未知錯誤'}`;
@@ -240,16 +255,16 @@ export function mountOverlay(ctx) {
     }
   });
 
-  // ── 目標：想試但還沒魔力試的組合 ──
+  // ── 待煉：想做但還沒魔力做的組合與路徑 ──
   //
   // 星星掛在判定那一行的最右邊，點亮就是「等一下要試這組」。
   // 清單只存材料，結果每次展開都用當下的共用配方表重算——
-  // 匯入別人的配方之後，本來「尚無紀錄」的目標會自己變成有結果。
+  // 匯入別人的配方之後，本來「尚無紀錄」的那幾筆會自己變成有結果。
   function makeStar(action, words, on) {
     const b = document.createElement('button');
     b.className = `star${on ? ' on' : ''}`;
     b.textContent = on ? '★' : '☆';
-    b.title = on ? '已設為目標，點一下取消' : '設為目標：之後想試這一組';
+    b.title = on ? '已加入待煉，點一下移除' : '加入待煉：之後想試這一組';
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -257,14 +272,27 @@ export function mountOverlay(ctx) {
       if (!r || !r.ok) return;
       b.classList.toggle('on', r.starred);
       b.textContent = r.starred ? '★' : '☆';
-      b.title = r.starred ? '已設為目標，點一下取消' : '設為目標：之後想試這一組';
+      b.title = r.starred ? '已加入待煉，點一下移除' : '加入待煉：之後想試這一組';
       b.setAttribute('aria-pressed', r.starred ? 'true' : 'false');
       refreshGoals();
     });
     return b;
   }
 
-  function goalLine(g) {
+  function removeBtn(title, onDone) {
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = '✕';
+    del.title = title;
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await onDone();
+    });
+    return del;
+  }
+
+  /** 單一組合：材料 ＋ 目前的判定 */
+  function comboLine(g) {
     const li = document.createElement('li');
     const what = document.createElement('div');
     what.className = 'what';
@@ -287,36 +315,88 @@ export function mountOverlay(ctx) {
     what.appendChild(say);
     li.appendChild(what);
 
-    const del = document.createElement('button');
-    del.className = 'del';
-    del.textContent = '✕';
-    del.title = '從目標移除';
-    del.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goal-toggle', action: g.action, inputs: g.inputs });
-      refreshGoals();
-      // 移掉的正好是現在選著的那組，星星要跟著暗下去
-      const cur = [els.ma.value.trim(), els.mb.value.trim()].filter(Boolean);
-      if (cur.join('|') === g.inputs.join('|')) evaluate(cur);
+    li.appendChild(
+      removeBtn('從待煉移除', async () => {
+        await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goal-remove', key: g.key });
+        refreshGoals();
+        // 移掉的正好是現在選著的那組，星星要跟著暗下去
+        const cur = [els.ma.value.trim(), els.mb.value.trim()].filter(Boolean);
+        if (cur.join('|') === g.inputs.join('|')) evaluate(cur);
+      })
+    );
+    return li;
+  }
+
+  /** 整條路徑：從儀表板「怎麼煉」存進來的，煉完一步就自動少一行 */
+  function pathLine(g) {
+    const li = document.createElement('li');
+    li.className = 'path';
+    const what = document.createElement('div');
+    what.className = 'what';
+
+    const head = document.createElement('span');
+    head.className = 'gm';
+    head.textContent = `${g.target}　還剩 ${g.steps.length} 步`;
+    what.appendChild(head);
+
+    const ol = document.createElement('ol');
+    ol.className = 'psteps';
+    g.steps.forEach((s) => {
+      const row = document.createElement('li');
+      const line = document.createElement('span');
+      line.className = 'say';
+      line.textContent =
+        s.action === 'refine'
+          ? `萃取 ${s.inputs[0]} → ${s.result}`
+          : `${s.inputs.join(' ＋ ')} → ${s.result}`;
+      if (s.needsPray) {
+        const tag = document.createElement('span');
+        tag.className = 'praytag';
+        tag.textContent = '需祈禱';
+        line.appendChild(tag);
+      }
+      row.appendChild(line);
+
+      // 自動打勾靠的是「擴充套件有看到那一爐」。沒看到（例如在別的瀏覽器煉的）
+      // 就用這顆手動劃掉，免得整條卡在那裡。
+      const ok = document.createElement('button');
+      ok.className = 'done';
+      ok.textContent = '✓';
+      ok.title = '這一步我做完了';
+      ok.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goal-step-done', stepKey: s.key });
+        refreshGoals();
+      });
+      row.appendChild(ok);
+      ol.appendChild(row);
     });
-    li.appendChild(del);
+    what.appendChild(ol);
+    li.appendChild(what);
+
+    li.appendChild(
+      removeBtn('整條從待煉移除', async () => {
+        await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goal-remove', key: g.key });
+        refreshGoals();
+      })
+    );
     return li;
   }
 
   async function refreshGoals() {
     const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goals' });
     const items = (r && r.ok && r.items) || [];
-    els.goalTitle.textContent = items.length ? `目標（${items.length}）` : '目標';
+    els.goalTitle.textContent = items.length ? `待煉（${items.length}）` : '待煉';
     if (els.goalList.classList.contains('hide')) return; // 收合著就不用畫清單
     els.goalList.textContent = '';
     if (!items.length) {
       const li = document.createElement('li');
       li.className = 'empty';
-      li.textContent = '還沒有。在判定那一行點☆，就會記到這裡。';
+      li.textContent = '還沒有。判定那一行點☆存一組，或在儀表板「怎麼煉」把整條路徑存進來。';
       els.goalList.appendChild(li);
       return;
     }
-    for (const g of items) els.goalList.appendChild(goalLine(g));
+    for (const g of items) els.goalList.appendChild(g.kind === 'path' ? pathLine(g) : comboLine(g));
   }
 
   function setGoalsOpen(open, persist = true) {
@@ -335,6 +415,8 @@ export function mountOverlay(ctx) {
     e.stopPropagation();
     setGoalsOpen(els.goalList.classList.contains('hide'));
   });
+  // 剛煉完的那一步被自動拿掉時，content.js 會轉這個事件過來
+  window.addEventListener('ia-goals-changed', () => refreshGoals());
   refreshGoals(); // 收合著也要先數一次，標題才顯示得出有幾個
 
   // ── 有新版本時浮出來的那顆 ──

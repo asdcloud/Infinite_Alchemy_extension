@@ -278,6 +278,73 @@ check('萃取也能設成目標', res.r && res.r.ok && res.r.key === 'refine:火
 res = await send({ type: 'ia-cmd', cmd: 'goal-toggle', action: 'combine', inputs: [] }, dashSender);
 check('沒材料就不收', res.r && res.r.ok === false, JSON.stringify(res.r));
 
+out.push('[待煉：整條路徑]');
+const PATH = [
+  { key: 'combine:水|火', action: 'combine', inputs: ['水', '火'], result: '蒸氣', needsPray: false },
+  { key: 'combine:土|蒸氣', action: 'combine', inputs: ['蒸氣', '土'], result: '溫泉', needsPray: false },
+  { key: 'combine:溫泉|雷', action: 'combine', inputs: ['溫泉', '雷'], result: '間歇泉', needsPray: true },
+];
+res = await send({ type: 'ia-cmd', cmd: 'goal-path', target: '間歇泉', steps: PATH }, dashSender);
+check('存得進去', res.r && res.r.ok === true && res.r.count === 3, JSON.stringify(res.r));
+
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+let pathItem = (res.r.items || []).find((g) => g.kind === 'path');
+check('清單裡認得出是一條路徑', !!pathItem && pathItem.target === '間歇泉', JSON.stringify(res.r.items.map((g) => g.kind)));
+check('三步都在', pathItem.steps.length === 3, String(pathItem.steps.length));
+check('祈禱的那步有標', pathItem.steps[2].needsPray === true, JSON.stringify(pathItem.steps[2]));
+
+// 同一個目標重新規劃 → 覆蓋，不是多存一條
+res = await send({ type: 'ia-cmd', cmd: 'goal-path', target: '間歇泉', steps: PATH.slice(0, 2) }, dashSender);
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+check('同一個目標只留一條', (res.r.items || []).filter((g) => g.kind === 'path').length === 1, JSON.stringify(res.r.items.length));
+check('覆蓋成新的那條', (res.r.items || []).find((g) => g.kind === 'path').steps.length === 2, '');
+
+res = await send({ type: 'ia-cmd', cmd: 'goal-path', target: '間歇泉', steps: PATH }, dashSender);
+res = await send({ type: 'ia-cmd', cmd: 'goal-path', target: '', steps: PATH }, dashSender);
+check('沒有目標就不收', res.r && res.r.ok === false, JSON.stringify(res.r));
+
+out.push('[煉成之後自動把那一步拿掉]');
+written.length = 0;
+res = await send(
+  {
+    type: 'ia-event',
+    payload: {
+      kind: 'attempt',
+      url: 'https://pillars-of-creation.funtuan.work/api/combine',
+      ok: true,
+      status: 200,
+      ts: Date.now(),
+      req: { a: '水', b: '火' },
+      res: { node: { word: '蒸氣', emoji: '💨' } },
+    },
+  },
+  gameSender
+);
+check('有回報這一爐劃掉了待煉的一步', res.r && res.r.pathTicked === 1, JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+pathItem = (res.r.items || []).find((g) => g.kind === 'path');
+check('那一步真的不見了', pathItem && pathItem.steps.length === 2, JSON.stringify(pathItem && pathItem.steps.map((s) => s.result)));
+check('剩下的是還沒做的兩步', pathItem.steps.map((s) => s.result).join(',') === '溫泉,間歇泉', JSON.stringify(pathItem.steps.map((s) => s.result)));
+
+// 手動劃掉剩下兩步 → 整條自動消失
+await send({ type: 'ia-cmd', cmd: 'goal-step-done', stepKey: 'combine:土|蒸氣' }, dashSender);
+res = await send({ type: 'ia-cmd', cmd: 'goal-step-done', stepKey: 'combine:溫泉|雷' }, dashSender);
+check('最後一步做完會回報有變動', res.r && res.r.changed === 1, JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+check('整條做完就自動消失', !(res.r.items || []).some((g) => g.kind === 'path'), JSON.stringify(res.r.items.map((g) => g.kind)));
+
+res = await send({ type: 'ia-cmd', cmd: 'goal-step-done', stepKey: 'combine:不存在|的' }, dashSender);
+check('劃掉不存在的步驟不會出事', res.r && res.r.ok === true && res.r.changed === 0, JSON.stringify(res.r));
+
+out.push('[goal-remove]');
+await send({ type: 'ia-cmd', cmd: 'goal-path', target: '間歇泉', steps: PATH }, dashSender);
+res = await send({ type: 'ia-cmd', cmd: 'goal-remove', key: 'path:間歇泉' }, dashSender);
+check('整條移得掉', res.r && res.r.ok === true, JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+check('移掉之後清單裡沒有路徑了', !(res.r.items || []).some((g) => g.kind === 'path'), '');
+res = await send({ type: 'ia-cmd', cmd: 'goal-remove' }, dashSender);
+check('沒給 key 就不動作', res.r && res.r.ok === false, JSON.stringify(res.r));
+
 out.push('[完全重置]');
 const broadcasts = [];
 window.chrome.runtime.sendMessage = (m) => broadcasts.push(m);

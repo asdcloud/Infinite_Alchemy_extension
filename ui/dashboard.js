@@ -725,20 +725,42 @@ function renderPlan(target) {
   if (missing.length) {
     head.appendChild(el('div', { text: `缺少：${missing.map(wordLabel).join('、')}（要去市集買，或還沒有人發現配方）` }));
   }
+  const actions = el('p', { class: 'row' });
+  // 走不通的路徑存了也沒用，就不給存
+  if (!blocked && steps.length) {
+    const msg = el('span', { class: 'muted' });
+    actions.appendChild(
+      el('button', {
+        class: 'ghost',
+        text: '📌 存進待煉',
+        title: '存到遊戲內浮層的「待煉」，煉的時候可以邊對照邊做',
+        onclick: async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          const r = await cmd({ type: 'ia-cmd', cmd: 'goal-path', target, steps });
+          btn.disabled = false;
+          msg.textContent =
+            r && r.ok
+              ? `已存進待煉（${r.count} 步）——遊戲裡的浮層展開「待煉」就看得到，煉完一步會自動劃掉。`
+              : `存不進去：${(r && r.error) || '背景服務沒有回應'}`;
+        },
+      })
+    );
+    actions.appendChild(msg);
+  }
   if (picked) {
-    head.appendChild(
-      el('p', {}, [
-        el('button', {
-          class: 'link',
-          text: '↺ 回到自動選的路徑',
-          onclick: () => {
-            state.treePick.clear();
-            renderPlan(target);
-          },
-        }),
-      ])
+    actions.appendChild(
+      el('button', {
+        class: 'link',
+        text: '↺ 回到自動選的路徑',
+        onclick: () => {
+          state.treePick.clear();
+          renderPlan(target);
+        },
+      })
     );
   }
+  if (actions.childNodes.length) head.appendChild(actions);
   box.appendChild(head);
 
   const ol = el('ul', { class: 'steps' });

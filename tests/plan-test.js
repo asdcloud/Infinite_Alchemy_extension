@@ -5,11 +5,15 @@ window.addEventListener('error', (e) => log.push('ERROR: ' + e.message));
 window.addEventListener('unhandledrejection', (e) => log.push('REJECT: ' + ((e.reason && e.reason.message) || e.reason)));
 localStorage.clear();
 
+const sent = [];
 window.chrome = {
   runtime: {
     id: 'test',
     onMessage: { addListener() {} },
-    sendMessage(m, cb) { if (typeof cb === 'function') cb({ ok: true }); },
+    sendMessage(m, cb) {
+      sent.push(m);
+      if (typeof cb === 'function') cb(m.cmd === 'goal-path' ? { ok: true, count: (m.steps || []).length } : { ok: true });
+    },
     getURL: (p) => p,
   },
   tabs: { create() {} },
@@ -166,6 +170,23 @@ check('步驟不再標 1. 2. 3.（那是可以照做的順序才用的）',
   [...document.querySelectorAll('#plan-result .steps .no')].every((n) => n.textContent.trim() === '・'),
   [...document.querySelectorAll('#plan-result .steps .no')].map((n) => n.textContent).join(''));
 check('樹上有標「循環，已截斷」', /循環/.test(document.getElementById('tree-out').textContent), '');
+
+out.push('[存進待煉]');
+await setAccount('A1');
+await plan('地熱');
+const saveBtn = () => [...document.querySelectorAll('#plan-result button')].find((b) => b.textContent.includes('存進待煉'));
+check('可行的路徑有「存進待煉」可以按', !!saveBtn());
+sent.length = 0;
+saveBtn().click();
+await wait(150);
+const saveMsg = sent.find((m) => m.cmd === 'goal-path');
+check('送出的是整條路徑', !!saveMsg && saveMsg.target === '地熱', JSON.stringify(saveMsg && { t: saveMsg.target, n: (saveMsg.steps || []).length }));
+check('步數跟畫面上的一致', saveMsg.steps.length === readSteps().length, `${saveMsg.steps.length} vs ${readSteps().length}`);
+check('每一步都帶著配方 key', saveMsg.steps.every((s) => !!s.key), JSON.stringify(saveMsg.steps.map((s) => s.key)));
+check('存完會回報結果', /已存進待煉/.test(document.getElementById('plan-result').textContent), '');
+
+await plan('遊戲王'); // 走不通的那條
+check('走不通的路徑不給存', !saveBtn(), '按鈕還在');
 
 out.push('[重新整理要真的重畫「怎麼煉」]');
 await setAccount('A1');

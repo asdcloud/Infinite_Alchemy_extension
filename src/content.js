@@ -16,17 +16,11 @@ window.addEventListener('message', (ev) => {
   if (ev.source !== window) return;
   const data = ev.data;
   if (!data || data.__iaTracker !== 1 || !data.payload) return;
-  send({ type: 'ia-event', payload: data.payload });
+  // 背景會回報「這一爐剛好把待煉路徑上的某一步做掉了」，轉給浮層即時把那行拿掉
+  sendAsync({ type: 'ia-event', payload: data.payload }).then((r) => {
+    if (r && r.pathTicked) window.dispatchEvent(new CustomEvent('ia-goals-changed'));
+  });
 });
-
-function send(msg) {
-  try {
-    const p = chrome.runtime.sendMessage(msg);
-    if (p && typeof p.catch === 'function') p.catch(() => {});
-  } catch (_) {
-    /* Extension context invalidated：重新整理遊戲頁面即可恢復 */
-  }
-}
 
 function sendAsync(msg) {
   return new Promise((resolve) => {

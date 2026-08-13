@@ -1,5 +1,5 @@
 // 遊戲內浮層的行為測試。
-// 重點：從煉製台自動讀出材料填進輸入框、沒有煉製台時別亂動、全服動態開關與 storage 同步。
+// 重點：從煉製台自動讀出材料填進輸入框、沒有煉製台時別亂動、待煉清單（組合與整條路徑）、全服動態開關。
 const o = document.getElementById('out');
 const out = [];
 let pass = 0;
@@ -25,7 +25,7 @@ window.chrome = {
   },
 };
 
-// 假的目標表：key → { action, inputs }
+// 假的待煉表：key → 組合或路徑
 const goals = new Map();
 const keyOf = (action, inputs) =>
   action === 'refine' ? `refine:${inputs[0]}` : `combine:${[...inputs].sort().join('|')}`;
@@ -61,14 +61,34 @@ const ctx = {
     if (m.cmd === 'goals') {
       const items = [...goals.values()]
         .sort((a, b) => b.addedAt - a.addedAt)
-        .map((g) => ({
-          ...g,
-          prediction:
-            g.inputs[0] === '水'
-              ? { status: 'unknown', result: null, emoji: null }
-              : { status: 'success', result: '殭屍', emoji: '🧟' },
-        }));
+        .map((g) =>
+          g.kind === 'path'
+            ? g
+            : {
+                ...g,
+                prediction:
+                  g.inputs[0] === '水'
+                    ? { status: 'unknown', result: null, emoji: null }
+                    : { status: 'success', result: '殭屍', emoji: '🧟' },
+              }
+        );
       return { ok: true, items };
+    }
+    if (m.cmd === 'goal-remove') {
+      goals.delete(m.key);
+      return { ok: true };
+    }
+    if (m.cmd === 'goal-step-done') {
+      let changed = 0;
+      for (const g of [...goals.values()]) {
+        if (g.kind !== 'path') continue;
+        const left = g.steps.filter((s) => s.key !== m.stepKey);
+        if (left.length === g.steps.length) continue;
+        changed++;
+        if (left.length) goals.set(g.key, { ...g, steps: left });
+        else goals.delete(g.key);
+      }
+      return { ok: true, changed };
     }
     return { ok: true };
   },
@@ -178,7 +198,7 @@ await settle();
 check('不會把你打的字擦掉', $('.ma').value === '土', $('.ma').value);
 
 // ── 全服動態收集開關 ──
-out.push('[目標：判定那一行的星星]');
+out.push('[待煉：判定那一行的星星]');
 $('.ma').value = '';
 $('.mb').value = '';
 $('.ma').dispatchEvent(new Event('input'));
@@ -191,15 +211,15 @@ await wait(400);
 const star = () => $('.verdict .star');
 check('有結果時星星出現在判定那一行最右邊', !!star() && star().parentElement.classList.contains('line'));
 check('預設是暗的', !star().classList.contains('on') && star().textContent === '☆');
-check('目標清單預設收合', $('.glist').classList.contains('hide'));
-check('標題本來只寫「目標」', $('.gt').textContent === '目標', $('.gt').textContent);
+check('待煉清單預設收合', $('.glist').classList.contains('hide'));
+check('標題本來只寫「待煉」', $('.gt').textContent === '待煉', $('.gt').textContent);
 
 star().click();
 await wait(60);
 check('點下去會點亮', star().classList.contains('on') && star().textContent === '★');
 check('送出的是 goal-toggle',
   cmds.some((m) => m.cmd === 'goal-toggle' && m.inputs.join('|') === '融合怪獸|不死者'), JSON.stringify(cmds.slice(-3)));
-check('標題跟著寫出數量', $('.gt').textContent === '目標（1）', $('.gt').textContent);
+check('標題跟著寫出數量', $('.gt').textContent === '待煉（1）', $('.gt').textContent);
 check('收合狀態不受影響', $('.glist').classList.contains('hide'));
 
 // 換一組再設一個
@@ -210,9 +230,9 @@ await wait(400);
 check('換一組之後星星回到暗的', !star().classList.contains('on'), star().textContent);
 star().click();
 await wait(60);
-check('第二個也設得起來', $('.gt').textContent === '目標（2）', $('.gt').textContent);
+check('第二個也設得起來', $('.gt').textContent === '待煉（2）', $('.gt').textContent);
 
-out.push('[目標：展開的清單]');
+out.push('[待煉：展開的清單]');
 $('.gh').click();
 await wait(60);
 check('點標題就展開', !$('.glist').classList.contains('hide'));
@@ -232,7 +252,54 @@ check('移掉的正好是選著的那組，星星跟著暗下去', !star().class
 rows[1].querySelector('.del') && $('.glist').querySelector('.del').click();
 await wait(60);
 check('全部移掉後顯示空狀態', $('.glist').querySelector('.empty') !== null, $('.glist').textContent);
-check('標題也回到只寫「目標」', $('.gt').textContent === '目標', $('.gt').textContent);
+check('標題也回到只寫「待煉」', $('.gt').textContent === '待煉', $('.gt').textContent);
+
+out.push('[待煉：整條路徑]');
+goals.set('path:間歇泉', {
+  key: 'path:間歇泉',
+  kind: 'path',
+  target: '間歇泉',
+  addedAt: 99,
+  steps: [
+    { key: 'k1', action: 'combine', inputs: ['水', '火'], result: '蒸氣', needsPray: false },
+    { key: 'k2', action: 'combine', inputs: ['蒸氣', '土'], result: '溫泉', needsPray: false },
+    { key: 'k3', action: 'combine', inputs: ['溫泉', '雷'], result: '間歇泉', needsPray: true },
+  ],
+});
+await new Promise((r) => { $('.gh').click(); setTimeout(r, 60); }); // 收起來
+await new Promise((r) => { $('.gh').click(); setTimeout(r, 60); }); // 再展開，重畫
+const pathLi = () => $('.glist li.path');
+check('路徑會畫成一整塊', !!pathLi());
+check('標題寫著要煉什麼與剩幾步', pathLi().querySelector('.gm').textContent.includes('間歇泉') && pathLi().querySelector('.gm').textContent.includes('3 步'), pathLi().querySelector('.gm').textContent);
+check('三步都列出來', pathLi().querySelectorAll('.psteps li').length === 3, String(pathLi().querySelectorAll('.psteps li').length));
+check('步驟寫成 材料＋材料 → 產物', pathLi().querySelector('.psteps .say').textContent.startsWith('水 ＋ 火 → 蒸氣'), pathLi().querySelector('.psteps .say').textContent);
+check('需祈禱的那步有標', !!pathLi().querySelectorAll('.psteps li')[2].querySelector('.praytag'));
+check('標題數量把路徑也算進去', $('.gt').textContent === '待煉（1）', $('.gt').textContent);
+
+// 手動劃掉第一步
+pathLi().querySelectorAll('.psteps .done')[0].click();
+await wait(60);
+check('劃掉之後只剩兩步', pathLi().querySelectorAll('.psteps li').length === 2, String(pathLi().querySelectorAll('.psteps li').length));
+check('剩幾步跟著更新', pathLi().querySelector('.gm').textContent.includes('2 步'), pathLi().querySelector('.gm').textContent);
+
+// 煉完最後兩步 → 整條消失（模擬背景轉來的事件）
+pathLi().querySelectorAll('.psteps .done')[0].click();
+await wait(60);
+pathLi().querySelectorAll('.psteps .done')[0].click();
+await wait(60);
+check('整條做完就自動消失', $('.glist li.path') === null, $('.glist').textContent);
+
+// 煉完某一步時，content.js 會轉這個事件過來，浮層要即時重畫
+goals.set('path:溫泉', {
+  key: 'path:溫泉', kind: 'path', target: '溫泉', addedAt: 98,
+  steps: [{ key: 'k9', action: 'combine', inputs: ['水', '火'], result: '蒸氣', needsPray: false }],
+});
+window.dispatchEvent(new CustomEvent('ia-goals-changed'));
+await wait(60);
+check('收到 ia-goals-changed 會即時重畫', !!$('.glist li.path'), $('.glist').textContent);
+$('.glist li.path .del').click();
+await wait(60);
+check('整條移得掉', $('.glist li.path') === null, $('.glist').textContent);
 
 $('.gh').click();
 await wait(20);
@@ -303,10 +370,10 @@ mountOverlay(ctx);
 await wait(150);
 root = document.getElementById(HOST).shadowRoot;
 check('掛載時就照 storage 顯示為開啟', $('.fd').checked === true && $('.st').textContent === '開啟中', $('.st').textContent);
-check('目標展開狀態也讀得回來', !$('.glist').classList.contains('hide'));
+check('待煉展開狀態也讀得回來', !$('.glist').classList.contains('hide'));
 check('讀回來的狀態不會再寫回 storage', writes.length === writesAtRemount, JSON.stringify(writes.slice(writesAtRemount)));
 check('展開時就把清單畫出來', $('.glist').querySelectorAll('li').length === 1, String($('.glist').querySelectorAll('li').length));
-check('標題帶著數量', $('.gt').textContent === '目標（1）', $('.gt').textContent);
+check('標題帶著數量', $('.gt').textContent === '待煉（1）', $('.gt').textContent);
 
 out.unshift(fail === 0 ? `RESULT: ALL PASS (${pass})` : `RESULT: ${fail} FAILED / ${pass} passed`);
 o.textContent = out.join('\n');
