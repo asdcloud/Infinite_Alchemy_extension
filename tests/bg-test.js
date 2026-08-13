@@ -199,6 +199,41 @@ check(
   JSON.stringify(written.map((w) => [w.result, w.isGlobalFirst]))
 );
 
+out.push('[全服動態收集]');
+// /api/ranking/recent 的列：別人煉的東西，含一筆崩解（沒有 resultWord）
+written.length = 0;
+window.__iaLearned = [];
+const FEED = [
+  { id: 901, action: 'combine', a: '鐵', b: '水', resultWord: '鏽', resultEmoji: '🟫', finderName: '路人甲', prayed: false, createdAt: 1700900000000 },
+  { id: 902, action: 'combine', a: '雲', b: '雷', resultWord: null, finderName: '路人乙', prayed: false, createdAt: 1700900100000 },
+  { id: 903, action: 'refine', a: '鐵', resultWord: '鏽蝕', resultEmoji: '🧪', finderName: '路人丙', prayed: true, createdAt: 1700900200000 },
+];
+res = await send({ type: 'ia-sync-data', kind: 'global-feed', rows: FEED, ts: Date.now() }, gameSender);
+check('有回覆', res.replied === true, JSON.stringify(res));
+check('三筆都收進配方表', res.r && res.r.learned === 3, JSON.stringify(res.r));
+check('★ 一筆都不進軌跡（那是別人煉的）', written.length === 0, JSON.stringify(written));
+const rust = window.__iaLearned.find((e) => e.key === 'combine:水|鐵');
+check('發現者記成遊戲回報的路人，不是我', rust && rust.rec.discoveredBy.finderName === '路人甲', JSON.stringify(rust && rust.rec.discoveredBy));
+check('★ 不會掛上我的帳號 id', rust && rust.rec.discoveredBy.accountId === null && rust.rec.discoveredBy.accountName === null, JSON.stringify(rust && rust.rec.discoveredBy));
+const dud = window.__iaLearned.find((e) => e.key === 'combine:雲|雷');
+check('沒有產物的那筆記成崩解', dud && dud.rec.normal.outcome === 'fail' && dud.rec.result === null, JSON.stringify(dud && dud.rec.normal));
+check('祈禱那筆記在 pray 軌', window.__iaLearned.find((e) => e.key === 'refine:鐵').pray?.outcome === 'success' || window.__iaLearned.find((e) => e.key === 'refine:鐵').rec.pray.outcome === 'success');
+res = await send({ type: 'ia-sync-data', kind: 'global-feed', rows: [], ts: Date.now() }, gameSender);
+check('空清單不會出事', res.r && res.r.learned === 0, JSON.stringify(res.r));
+
+out.push('[輪詢租約：同時只有一個分頁在打]');
+res = await send({ type: 'ia-cmd', cmd: 'feed-claim' }, { id: 'testext', url: 'https://pillars-of-creation.funtuan.work/', tab: { id: 11 } });
+check('第一個分頁拿到租約', res.r && res.r.granted === true, JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'feed-claim' }, { id: 'testext', url: 'https://pillars-of-creation.funtuan.work/', tab: { id: 22 } });
+check('第二個分頁拿不到，不會變兩倍請求', res.r && res.r.granted === false, JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'feed-claim' }, { id: 'testext', url: 'https://pillars-of-creation.funtuan.work/', tab: { id: 11 } });
+check('持有者可以續約', res.r && res.r.granted === true, JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'feed-claim' }, dashSender);
+check('沒有 tabId 的來源拿不到租約', res.r && res.r.granted === false, JSON.stringify(res.r));
+
+res = await send({ type: 'ia-cmd', cmd: 'feed-stats' }, dashSender);
+check('統計有累加', res.r && res.r.stats.polls >= 1 && res.r.stats.learned >= 3, JSON.stringify(res.r && res.r.stats));
+
 out.push('[完全重置]');
 const broadcasts = [];
 window.chrome.runtime.sendMessage = (m) => broadcasts.push(m);
@@ -212,19 +247,24 @@ check(
 );
 check('有廣播 ia-reset 讓開著的頁面重載', broadcasts.some((m) => m && m.type === 'ia-reset'), JSON.stringify(broadcasts));
 
-out.push('[更新只打「我自己的」那幾支]');
+out.push('[content.js 只會打白名單上的端點]');
 // 直接掃 content.js 裡所有的 API 路徑字面值——不管寫成什麼形式都抓得到，
-// 這樣以後有人（包括我）把逐一走訪造物的迴圈加回去，測試就會紅。
+// 這樣以後有人（包括我）加了新端點或把逐一走訪造物的迴圈放回來，測試就會紅。
 const SYNC_SRC = await (await fetch('/src/content.js')).text();
-const paths = [...new Set([...SYNC_SRC.matchAll(/['"`](\/(?:me|combine-log|nodes)[^'"`]*)['"`]/g)].map((m) => m[1]))].sort();
-const ALLOWED = ['/combine-log', '/me', '/me/discoveries', '/me/inventions', '/me/recipes', '/me/seeds'];
+const paths = [...new Set([...SYNC_SRC.matchAll(/['"`](\/(?:me|combine-log|ranking|nodes)[^'"`]*)['"`]/g)].map((m) => m[1]))].sort();
+const ALLOWED = [
+  '/me', '/me/discoveries', '/me/seeds', '/me/inventions', '/me/recipes', // 更新：我自己的
+  '/combine-log', // 更新：我自己的煉製紀錄
+  '/ranking/recent', // 全服動態收集（可關閉）
+];
 const base = (p) => p.split('?')[0];
 check('沒有任何逐一走訪造物的請求', !paths.some((p) => p.includes('/nodes/')), paths.join(' , '));
 check(
-  '只打「我自己的」那幾支',
+  '每一支都在白名單上',
   paths.every((p) => ALLOWED.includes(base(p))),
   paths.filter((p) => !ALLOWED.includes(base(p))).join(' , ') || paths.join(' , ')
 );
+check('全服動態只用 ranking/recent 這一支', paths.filter((p) => p.startsWith('/ranking')).join(',') === '/ranking/recent', paths.filter((p) => p.startsWith('/ranking')).join(','));
 check('確實有讀煉製紀錄與我發現的配方', paths.some((p) => base(p) === '/combine-log') && paths.some((p) => base(p) === '/me/recipes'), paths.join(' , '));
 
 out.push('[未知指令與不明來源]');

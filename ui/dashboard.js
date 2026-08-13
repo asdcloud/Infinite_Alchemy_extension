@@ -261,6 +261,7 @@ function renderAll() {
   renderKnowledge();
   renderSuggest();
   renderBag();
+  renderFeed();
 }
 
 // ── 軌跡 ────────────────────────────────────────────────
@@ -1126,6 +1127,38 @@ $('account-select').addEventListener('change', async (e) => {
 $('sync').addEventListener('click', () => startSync());
 $('sync-run').addEventListener('click', () => startSync());
 $('sync-cancel').addEventListener('click', () => cmd({ type: 'ia-cmd', cmd: 'sync-cancel' }));
+
+// 全服動態收集（開關存在 chrome.storage.local，遊戲分頁的 content script 直接讀得到）
+async function renderFeed() {
+  const r = await cmd({ type: 'ia-cmd', cmd: 'feed-stats' });
+  const s = (r && r.ok && r.stats) || null;
+  $('feed-stats').textContent =
+    s && s.polls
+      ? `已讀取 ${fmt(s.polls)} 次、看過 ${fmt(s.rows)} 筆紀錄、併入 ${fmt(s.learned)} 組配方${
+          s.lastAt ? `・最後一次 ${fmtTime(s.lastAt).slice(5)}` : ''
+        }`
+      : '尚未收集過';
+}
+
+$('feed-toggle').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  $('feed-state').textContent = on ? '開啟中' : '關閉';
+  try {
+    chrome.storage.local.set({ globalFeed: on });
+  } catch (_) {
+    $('feed-state').textContent = '無法儲存設定';
+  }
+});
+
+try {
+  chrome.storage.local.get(['globalFeed'], (v) => {
+    const on = !!(v && v.globalFeed);
+    $('feed-toggle').checked = on;
+    $('feed-state').textContent = on ? '開啟中' : '關閉';
+  });
+} catch (_) {
+  /* 測試頁沒有 chrome API */
+}
 
 $('diagnose').addEventListener('click', async () => {
   const box = $('diag-out');

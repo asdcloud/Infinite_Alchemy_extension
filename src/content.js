@@ -327,6 +327,65 @@ async function runSync(opts) {
   }
 }
 
+// ── 全服動態收集（預設關閉）─────────────────────────────
+//
+// 開啟後每 30 秒讀一次 /api/ranking/recent（遊戲自己的「全服最新的合成紀錄」），
+// 把裡面的配方收進共用配方表。**只進配方表，不進你的軌跡**——那是別人煉的。
+//
+// 預設關閉是因為它會持續發請求。為了不讓負載失控：
+//   · 只有拿到租約的那一個分頁會輪詢，開好幾個遊戲分頁也不會變好幾倍
+//   · 只送沒看過的列給背景，重複的直接丟掉
+//   · 分頁在背景時瀏覽器本來就會把計時器降頻，剛好順勢減少請求
+
+const FEED_INTERVAL_MS = 30000;
+const feed = { timer: null, seen: new Set(), on: false };
+
+async function pollGlobalFeed() {
+  // 先確認這個分頁是不是被指定的那一個
+  const lease = await sendAsync({ type: 'ia-cmd', cmd: 'feed-claim' });
+  if (!lease || !lease.granted) return;
+
+  let data;
+  try {
+    data = await api('/ranking/recent');
+  } catch (_) {
+    return; // 網路或權限問題就這輪跳過，下一輪再試
+  }
+  const rows = (data.combines || []).filter((e) => {
+    if (!e || !e.a) return false;
+    // 注意用 == null 而不是 !id：id 為 0 是合法的，用 !id 會把那一列吃掉
+    const id = e.id ?? `${e.action}|${e.a}|${e.b ?? ''}|${e.createdAt ?? ''}`;
+    if (id == null || feed.seen.has(id)) return false;
+    feed.seen.add(id);
+    return true;
+  });
+  // seen 只用來擋重複，不必無限長大
+  if (feed.seen.size > 3000) feed.seen = new Set([...feed.seen].slice(-1500));
+  if (rows.length) await sendAsync({ type: 'ia-sync-data', kind: 'global-feed', rows, ts: Date.now() });
+}
+
+function setGlobalFeed(on) {
+  if (on === feed.on) return;
+  feed.on = on;
+  if (feed.timer) {
+    clearInterval(feed.timer);
+    feed.timer = null;
+  }
+  if (on) {
+    pollGlobalFeed();
+    feed.timer = setInterval(pollGlobalFeed, FEED_INTERVAL_MS);
+  }
+}
+
+try {
+  chrome.storage.local.get(['globalFeed'], (v) => setGlobalFeed(!!(v && v.globalFeed)));
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.globalFeed) setGlobalFeed(!!changes.globalFeed.newValue);
+  });
+} catch (_) {
+  /* 沒有 storage 權限就當作關閉 */
+}
+
 // ── 浮層 ───────────────────────────────────────────────
 // content script 是 classic script，不能靜態 import；用動態 import 載入模組
 // （overlay.js 必須列在 manifest 的 web_accessible_resources）。

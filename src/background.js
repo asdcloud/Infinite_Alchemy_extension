@@ -23,10 +23,9 @@ import {
   recipeKey,
   normalizeInputs,
   predict,
-  recipesByResult,
   SOURCE,
 } from './knowledge.js';
-import { plan as planPath, knownCombosFromOwned } from './planner.js';
+import { knownCombosFromOwned } from './planner.js';
 import { PRIMORDIALS } from './analysis.js';
 import { getKnowledge } from './db.js';
 
@@ -53,7 +52,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     case 'ia-cmd':
       if (!fromSelf) return;
-      job = handleCommand(msg);
+      // content script 不知道自己的 tabId，由這裡從 sender 補上（租約要用）
+      job = handleCommand({ ...msg, tabId: sender && sender.tab ? sender.tab.id : null });
       break;
     default:
       return;
@@ -471,6 +471,31 @@ function makeHistoryAttempt(o, account, syncTs) {
 }
 
 /**
+ * /api/ranking/recent → 全服最新的合成紀錄（所有玩家的）
+ * 每列 { id, action, a, aEmoji, b, bEmoji, resultWord, resultEmoji, finderName, prayed, createdAt }
+ *
+ * **只進共用配方表，絕不進軌跡**——這些是別人煉的，不是你做過的事。
+ * 也不帶入你的帳號資訊，發現者一律照遊戲回報的 finderName 記。
+ */
+async function learnGlobalFeed(ev) {
+  const rows = (ev.rows || []).filter((e) => e && e.a);
+  if (!rows.length) return { ok: true, learned: 0, seen: 0 };
+  const ts = ev.ts || Date.now();
+  const learned = await upsertKnowledgeBatch(
+    rows.map((e) => fromGameLogEntry(e, { ts, source: SOURCE.SYNC })) // 不傳 accountId/accountName
+  );
+
+  const prev = (await getMeta('feedStats', null)) || { polls: 0, rows: 0, learned: 0, lastAt: 0 };
+  await setMeta('feedStats', {
+    polls: prev.polls + 1,
+    rows: prev.rows + rows.length,
+    learned: prev.learned + learned,
+    lastAt: ts,
+  });
+  return { ok: true, learned, seen: rows.length };
+}
+
+/**
  * /api/me/recipes?offset=N → 所有由我首度發現的配方（分頁）
  * 每列 { action, a, aEmoji, b, bEmoji, resultWord, resultEmoji, prayed, createdAt }
  *
@@ -553,8 +578,27 @@ function syncIsRunning() {
   return true;
 }
 
-// 遊戲分頁被關掉時，同步一定跑不下去了
+// 全服動態輪詢的租約：同時只讓一個遊戲分頁去打，開了三個分頁也不會變三倍請求。
+// 持有者每次輪詢前續約，超過兩輪沒續約就視為失效讓別的分頁接手。
+const FEED_LEASE_MS = 70000;
+const feedLease = { tabId: null, at: 0 };
+
+function claimFeedLease(tabId) {
+  const now = Date.now();
+  if (feedLease.tabId != null && feedLease.tabId !== tabId && now - feedLease.at < FEED_LEASE_MS) {
+    return false; // 別的分頁還握著
+  }
+  feedLease.tabId = tabId;
+  feedLease.at = now;
+  return true;
+}
+
+// 遊戲分頁被關掉時，同步一定跑不下去了；輪詢租約也要放掉
 chrome.tabs.onRemoved.addListener((tabId) => {
+  if (feedLease.tabId === tabId) {
+    feedLease.tabId = null;
+    feedLease.at = 0;
+  }
   if (sync.tabId === tabId) {
     sync.running = false;
     broadcast({ type: 'ia-progress', phase: 'error', error: '遊戲分頁已關閉' });
@@ -565,12 +609,6 @@ async function handleCommand(msg) {
   switch (msg.cmd) {
     case 'ping':
       return { ok: true, version: chrome.runtime.getManifest().version, contract: 2 };
-    case 'status':
-      return {
-        ok: true,
-        sync: { running: sync.running, progress: sync.progress },
-        knowledge: await countKnowledge(),
-      };
     case 'sync-start':
       return startSync(msg.opts || {});
     case 'sync-cancel':
@@ -585,14 +623,13 @@ async function handleCommand(msg) {
       return importPayload(msg.payload, msg.label);
     case 'predict':
       return doPredict(msg.action, msg.inputs);
-    case 'plan':
-      return doPlan(msg.target, msg.mode, msg.accountId);
     case 'suggest':
       return doSuggest(msg.accountId, msg.limit);
-    case 'owned':
-      return doOwned(msg.accountId);
-    case 'known-words':
-      return doKnownWords();
+    case 'feed-claim':
+      // 只有拿到租約的分頁才輪詢；tabId 由訊息處理器從 sender 補上
+      return { ok: true, granted: msg.tabId != null && claimFeedLease(msg.tabId) };
+    case 'feed-stats':
+      return { ok: true, stats: (await getMeta('feedStats', null)) || { polls: 0, rows: 0, learned: 0, lastAt: 0 } };
     case 'open-dashboard':
       await chrome.tabs.create({ url: chrome.runtime.getURL('ui/dashboard.html') });
       return { ok: true };
@@ -624,36 +661,9 @@ async function doPredict(action, inputs) {
   return { ok: true, inputs: norm, action: act, prediction: predict(rec) };
 }
 
-async function doPlan(target, mode, accountId) {
-  if (!target) return { ok: false, error: '請提供目標造物' };
-  const [knowledge, owned] = await Promise.all([allKnowledge(), ownedSet(accountId)]);
-  const byResult = recipesByResult(knowledge);
-  return { ok: true, plan: planPath(target, owned, byResult, mode || 'steps') };
-}
-
 async function doSuggest(accountId, limit) {
   const [knowledge, owned] = await Promise.all([allKnowledge(), ownedSet(accountId)]);
   return { ok: true, items: knownCombosFromOwned(owned, knowledge, limit || 60), ownedCount: owned.size };
-}
-
-async function doOwned(accountId) {
-  const id = await currentAccountId(accountId);
-  const inv = await getInventory(String(id ?? 'unknown'));
-  const state = await getAccountState(String(id ?? 'unknown'));
-  return {
-    ok: true,
-    accountId: id,
-    count: inv ? inv.count ?? Object.keys(inv.items || {}).length : 0,
-    snapshotAt: inv ? inv.snapshotAt ?? null : null,
-    state: state || null,
-  };
-}
-
-async function doKnownWords() {
-  const knowledge = await allKnowledge();
-  const words = new Set();
-  for (const k of knowledge) if (k.result) words.add(k.result);
-  return { ok: true, words: [...words] };
 }
 
 async function findGameTab() {
@@ -718,6 +728,8 @@ async function handleSyncData(msg) {
       return handleInventions({ res: msg.data, ts: msg.ts || Date.now() });
     case 'my-recipes':
       return learnMyRecipes({ data: msg.data, ts: msg.ts || Date.now() });
+    case 'global-feed':
+      return learnGlobalFeed({ rows: msg.rows, ts: msg.ts || Date.now() });
     case 'combine-log':
       return learnFromLog({ res: msg.data, ts: msg.ts || Date.now() });
     default:

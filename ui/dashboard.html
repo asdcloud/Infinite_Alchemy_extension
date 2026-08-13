@@ -2,13 +2,13 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <title>煉製軌跡 v1.0.1 · 無限煉製</title>
+    <title>煉製軌跡 v1.1.0 · 無限煉製</title>
     <link rel="stylesheet" href="dashboard.css" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand"><span class="flask">⚗️</span> 煉製軌跡</div>
-      <span class="ver" id="version" title="目前載入的版本。改版後這裡沒變，表示擴充套件還沒重新載入">v1.0.1</span>
+      <span class="ver" id="version" title="目前載入的版本。改版後這裡沒變，表示擴充套件還沒重新載入">v1.1.0</span>
       <div class="spacer"></div>
       <label class="account" for="account-select">帳號</label>
       <select id="account-select" title="切換要檢視的煉金師帳號"></select>
@@ -201,6 +201,25 @@
           <div class="row">
             <button class="ghost" id="export-json">匯出 JSON（完整備份）</button>
             <button class="ghost" id="export-csv">匯出 CSV（目前帳號軌跡）</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>全服動態收集</h2>
+          <p class="muted">
+            開啟後，只要遊戲分頁開著，就會<b>每 30 秒</b>讀一次遊戲的「全服最新的合成紀錄」，
+            把裡面所有玩家的配方收進共用配方表。配方表長得快很多，查配方與規劃也就更準。
+          </p>
+          <ul class="muted notes">
+            <li><b>只進共用配方表，不會進你的軌跡</b>——那些是別人煉的，不是你做過的事。</li>
+            <li>開好幾個遊戲分頁也只有一個會輪詢，不會變成好幾倍請求。</li>
+            <li><b>預設關閉</b>，因為它會持續發請求。覺得電腦或網路吃緊就關掉，隨時可以再開。</li>
+          </ul>
+          <div class="row">
+            <label class="switch">
+              <input type="checkbox" id="feed-toggle" />
+              <span id="feed-state">關閉</span>
+            </label>
+            <span class="muted" id="feed-stats"></span>
           </div>
         </div>
         <div class="panel">

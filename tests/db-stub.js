@@ -135,14 +135,17 @@ export async function getInventory(id) {
 export async function getAccountState(id) {
   return STATE[String(id)] || null;
 }
+// meta 要能真的來回讀寫，否則像 feedStats 這種累加值測不出來
+const META = new Map([
+  ['account', { id: 'A1', name: '主號', isGuest: false }],
+  ['accounts', { A1: { id: 'A1', name: '主號', lastSeen: T(6) }, A2: { id: 'A2', name: '小號', lastSeen: T(8) } }],
+]);
 export async function getMeta(k, fb = null) {
-  if (k === 'account') return { id: 'A1', name: '主號', isGuest: false };
-  if (k === 'accounts') {
-    return { A1: { id: 'A1', name: '主號', lastSeen: T(6) }, A2: { id: 'A2', name: '小號', lastSeen: T(8) } };
-  }
-  return fb;
+  return META.has(k) ? META.get(k) : fb;
 }
-export async function setMeta() {}
+export async function setMeta(k, v) {
+  META.set(k, v);
+}
 export async function clearAttempts() {}
 export async function bulkAdd() {
   return 0;
@@ -170,6 +173,7 @@ export async function wipeAll() {
   KNOWLEDGE.length = 0;
   for (const k of Object.keys(INV)) delete INV[k];
   for (const k of Object.keys(STATE)) delete STATE[k];
+  META.clear();
   window.__iaWiped.push(counts);
   return counts;
 }

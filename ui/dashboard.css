@@ -441,6 +441,24 @@ body.single-account .col-account {
   cursor: default;
 }
 
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--muted);
+}
+.switch input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+.switch input:checked + span {
+  color: var(--gold-bright);
+}
+
 .diag {
   margin: 12px 0 0;
   padding: 12px 14px;
