@@ -18,7 +18,7 @@
 
 ## 安裝
 
-1. 到 [Releases](../../releases) 下載 `infinite-alchemy-tracker-vX.X.X.zip` 並解壓縮
+1. 到 [Releases](../../releases) 下載 `infinite-alchemy-helper-vX.X.X.zip` 並解壓縮
 2. 開啟 `chrome://extensions/`（Edge 是 `edge://extensions/`）
 3. 右上角開啟「**開發人員模式**」
 4. 點「**載入未封裝項目**」，選擇解壓縮後的資料夾
@@ -35,7 +35,7 @@
 > - **升版時沿用同一個資料夾**：把新檔案覆蓋上去，再到 `chrome://extensions` 按「重新載入」
 > - 用 GitHub 的「**Source code (zip)**」或 clone 的話，解壓資料夾會叫 `..._helper-1.0.1`，
 >   **版本號在路徑裡**——下一版就換路徑了。請自己改成一個固定名稱（例如 `無限煉製擴充套件`）再載入
-> - Releases 裡附的 `infinite-alchemy-tracker-*.zip` 解壓後固定是 `無限煉製擴充套件`，沒有這個問題
+> - Releases 裡附的 `infinite-alchemy-helper-*.zip` 解壓後固定是 `無限煉製擴充套件`，沒有這個問題
 
 ## 兩層資料
 
