@@ -1,16 +1,20 @@
 // 遊戲內浮層：合成之前先告訴你這組材料有沒有人試過。
 //
-// 自動偵測的依據是工坊裡的材料格：
-//   <button class="chip r{星等} selected"><span>{emoji}</span><span>{詞}</span></button>
-// 選中的格子會多一個 selected class。遊戲改版導致抓不到時會自動切回手動輸入，
-// 不會影響記錄功能，也不會干擾遊戲本身。
+// 自動偵測讀的是煉製台上那兩個格子：
+//   <div class="workbench"><div class="slots">
+//     <div class="slot filled"><div class="chip r{星等}"><span>{emoji}</span><span>{詞}</span></div>…</div>
+//     <span class="op">＋</span>
+//     <div class="slot">…</div>          ← 沒放東西的格子沒有 filled
+//   </div></div>
+// 你在遊戲裡點材料，格子一填上，兩個輸入框就自動跟著填、判定跟著出來。
+// 想查還沒放進去的組合，直接在框裡打字也行。
+//
+// 兩格都有＝煉成，只有一格＝萃取——跟遊戲那顆按鈕的判斷一模一樣。
 
 const HOST_ID = 'ia-tracker-overlay';
-const CHIP_SELECTORS = [
-  'button.chip.selected',
-  '.chip.selected',
-  '[class*="chip"][class*="selected"]',
-];
+// 由準到寬：先找煉製台，再退而求其次找材料列表選中的那幾顆
+const SLOT_SCOPES = ['.workbench .slots', '.slots'];
+const TRAY_SELECTORS = ['button.chip.selected', '.chip.selected'];
 
 const VERDICT = {
   success: { icon: '✅', tone: 'ok', text: '已知可成' },
@@ -41,11 +45,6 @@ const CSS = `
 }
 .head button:hover { color: #f2e6cf; }
 .body { padding: 9px 10px 10px; }
-.pair { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; }
-.mat {
-  background: #34281a; border: 1px solid #4a3925; border-radius: 7px; padding: 1px 8px; font-size: 13px;
-}
-.op { color: #806b4c; }
 .verdict { border-radius: 8px; padding: 6px 9px; border: 1px solid; font-size: 12.5px; }
 .verdict.ok   { color: #a9e6b4; border-color: #3f6f47; background: rgba(116,207,130,.09); }
 .verdict.pray { color: #c9b4ff; border-color: #5b46a0; background: rgba(168,131,255,.09); }
@@ -53,12 +52,14 @@ const CSS = `
 .verdict.dim  { color: #b39c76; border-color: #3a2c1c; background: rgba(255,255,255,.02); }
 .verdict .res { color: #f7d183; font-weight: 600; }
 .sub { color: #806b4c; font-size: 11.5px; margin-top: 3px; }
-.manual { display: flex; gap: 5px; margin-bottom: 7px; }
-.manual input {
+.mats { display: flex; align-items: center; gap: 5px; margin-bottom: 7px; }
+.mats input {
   all: unset; flex: 1; min-width: 0; background: #1c1610; border: 1px solid #4a3925;
   border-radius: 7px; padding: 4px 8px; color: #f2e6cf; font-size: 12.5px;
 }
-.manual input:focus { border-color: #e0b155; }
+.mats input:focus { border-color: #e0b155; }
+.mats input.auto { border-color: #6b5330; background: #241b12; }
+.mats .op { color: #806b4c; flex: none; }
 .feed {
   display: flex; align-items: center; gap: 6px;
   margin-top: 9px; padding-top: 8px; border-top: 1px solid rgba(74,57,37,.55);
@@ -102,11 +103,10 @@ export function mountOverlay(ctx) {
       <button class="fold" title="收合">－</button>
     </div>
     <div class="body">
-      <div class="pair"></div>
-      <div class="manual hide">
-        <input class="ma" placeholder="材料 A" /><input class="mb" placeholder="材料 B" />
+      <div class="mats">
+        <input class="ma" placeholder="材料 A" /><span class="op">＋</span><input class="mb" placeholder="材料 B" />
       </div>
-      <div class="verdict dim">選兩個材料，這裡會顯示已知結果</div>
+      <div class="verdict dim">在遊戲裡點材料，這裡就會顯示結果</div>
       <div class="prog hide"><span class="ptext"></span><span class="bar"><i></i></span></div>
       <div class="feed">
         <span class="lbl" title="開啟後每 30 秒讀一次全服最新的合成紀錄，把別人的配方也收進共用配方表。只進配方表，不會進你的軌跡。">全服動態收集</span>
@@ -119,9 +119,6 @@ export function mountOverlay(ctx) {
 
   const $ = (s) => root.querySelector(s);
   const els = {
-    wrap,
-    pair: $('.pair'),
-    manual: $('.manual'),
     ma: $('.ma'),
     mb: $('.mb'),
     verdict: $('.verdict'),
@@ -134,8 +131,7 @@ export function mountOverlay(ctx) {
     feedLabel: $('.feed .lbl'),
   };
 
-  let lastKey = '';
-  let manualMode = false;
+  let lastDetected = null; // 上一次從遊戲讀到的組合（null＝還沒讀到過煉製台）
 
   // ── 收合狀態 ──
   chrome.storage?.local?.get?.(['overlayCollapsed'], (v) => {
@@ -187,9 +183,44 @@ export function mountOverlay(ctx) {
     }
   });
 
-  // ── 偵測選中的材料 ──
-  function readSelected() {
-    for (const sel of CHIP_SELECTORS) {
+  // ── 偵測煉製台上放了什麼 ──
+  //
+  // 回傳 null 代表「這頁上沒有煉製台」——不是「什麼都沒選」。
+  // 這兩者一定要分開：前者要放著不動（別擦掉使用者自己打的字），後者才清空。
+  function chipWord(chip) {
+    // chip 的結構是 <span>emoji</span><span>詞</span>；收藏過的還會多一個空的 .chip-fav
+    const spans = [...chip.querySelectorAll('span')].filter(
+      (s) => !s.classList.contains('chip-fav') && s.textContent.trim()
+    );
+    const node = spans.length ? spans[spans.length - 1] : chip;
+    return node.textContent.trim();
+  }
+
+  function readWorkbench() {
+    for (const sel of SLOT_SCOPES) {
+      let box;
+      try {
+        box = document.querySelector(sel);
+      } catch (_) {
+        continue;
+      }
+      if (!box) continue;
+      const slots = box.querySelectorAll('.slot');
+      if (!slots.length) continue;
+      const words = [];
+      for (const s of slots) {
+        const chip = s.querySelector('.chip');
+        const w = chip ? chipWord(chip) : '';
+        if (w) words.push(w);
+      }
+      return words.slice(0, 2);
+    }
+    return null;
+  }
+
+  // 退路：遊戲改版把煉製台換掉時，改看材料列表裡被點亮的那幾顆
+  function readTray() {
+    for (const sel of TRAY_SELECTORS) {
       let nodes;
       try {
         nodes = document.querySelectorAll(sel);
@@ -199,39 +230,31 @@ export function mountOverlay(ctx) {
       if (!nodes.length) continue;
       const words = [];
       for (const n of nodes) {
-        const spans = n.querySelectorAll('span');
-        // chip 的結構是 <span>emoji</span><span>詞</span>，取最後一個
-        const w = (spans.length ? spans[spans.length - 1].textContent : n.textContent) || '';
-        const t = w.trim();
-        if (t) words.push(t);
+        const w = chipWord(n);
+        if (w) words.push(w);
       }
       if (words.length) return words.slice(0, 2);
     }
-    return [];
+    return null;
   }
 
-  function renderPair(words) {
-    els.pair.textContent = '';
-    words.forEach((w, i) => {
-      if (i > 0) {
-        const op = document.createElement('span');
-        op.className = 'op';
-        op.textContent = '＋';
-        els.pair.appendChild(op);
-      }
-      const m = document.createElement('span');
-      m.className = 'mat';
-      m.textContent = w;
-      els.pair.appendChild(m);
-    });
+  const readSelected = () => readWorkbench() ?? readTray();
+
+  function fillInputs(words) {
+    els.ma.value = words[0] || '';
+    els.mb.value = words[1] || '';
+    // 淡淡的框線代表「這是從遊戲讀來的」，自己打的字就是一般框線
+    els.ma.classList.toggle('auto', !!words[0]);
+    els.mb.classList.toggle('auto', !!words[1]);
   }
 
-  function showVerdict(pred, words) {
+  function showVerdict(pred, action) {
     const v = VERDICT[pred.status] || VERDICT.unknown;
     els.verdict.className = `verdict ${v.tone}`;
     els.verdict.textContent = '';
     const line = document.createElement('div');
-    line.textContent = `${v.icon} ${v.text}`;
+    // 只放一樣材料時遊戲那顆按鈕會變成「萃取」，這裡也標出來，免得看成煉成的結果
+    line.textContent = `${v.icon} ${action === 'refine' ? '萃取：' : ''}${v.text}`;
     els.verdict.appendChild(line);
 
     if (pred.result && (pred.status === 'success' || pred.status === 'pray-only' || pred.status === 'pray-known')) {
@@ -256,27 +279,27 @@ export function mountOverlay(ctx) {
       sub.textContent = bits.join('・');
       els.verdict.appendChild(sub);
     }
-    void words;
   }
 
   async function evaluate(words) {
     if (words.length < 1) {
       els.verdict.className = 'verdict dim';
-      els.verdict.textContent = '選兩個材料，這裡會顯示已知結果';
+      els.verdict.textContent = '在遊戲裡點材料，這裡就會顯示結果';
       return;
     }
     const action = words.length === 1 ? 'refine' : 'combine';
     const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'predict', action, inputs: words });
-    if (r && r.ok) showVerdict(r.prediction, words);
+    if (r && r.ok) showVerdict(r.prediction, action);
   }
 
+  // 只在「遊戲那邊真的變了」時才動輸入框，否則自己打到一半的字會被擦掉
   function tick() {
-    if (manualMode) return;
     const words = readSelected();
+    if (words === null) return;
     const key = words.join('|');
-    if (key === lastKey) return;
-    lastKey = key;
-    renderPair(words);
+    if (key === lastDetected) return;
+    lastDetected = key;
+    fillInputs(words);
     evaluate(words);
   }
 
@@ -296,38 +319,24 @@ export function mountOverlay(ctx) {
     /* 忽略 */
   }
 
-  // 開場先試一次；若一直抓不到選取狀態，就切成手動輸入
-  setTimeout(() => {
-    tick();
-    if (!readSelected().length) enableManualFallback();
-  }, 2500);
+  // content script 跑在 document_start，遊戲通常還沒畫出來；MutationObserver 會接手，
+  // 這兩次只是保險：萬一浮層掛好時畫面早就靜止了，也要讀得到現況
+  tick();
+  setTimeout(tick, 1200);
 
-  function enableManualFallback() {
-    if (manualMode) return;
-    manualMode = true;
-    els.manual.classList.remove('hide');
-    const run = () => {
+  // 想查還沒放進煉製台的組合，直接在框裡打字
+  let typeTimer = null;
+  const onType = () => {
+    if (typeTimer) clearTimeout(typeTimer);
+    typeTimer = setTimeout(() => {
       const words = [els.ma.value.trim(), els.mb.value.trim()].filter(Boolean);
-      renderPair(words);
+      els.ma.classList.remove('auto');
+      els.mb.classList.remove('auto');
       evaluate(words);
-    };
-    let t = null;
-    for (const input of [els.ma, els.mb]) {
-      input.addEventListener('input', () => {
-        if (t) clearTimeout(t);
-        t = setTimeout(run, 250);
-      });
-    }
-  }
-
-  // 只要偵測得到就退出手動模式
-  const autoWatch = setInterval(() => {
-    if (manualMode && readSelected().length) {
-      manualMode = false;
-      els.manual.classList.add('hide');
-      clearInterval(autoWatch);
-    }
-  }, 4000);
+    }, 250);
+  };
+  els.ma.addEventListener('input', onType);
+  els.mb.addEventListener('input', onType);
 
   // ── 全服動態收集開關 ──
   //
