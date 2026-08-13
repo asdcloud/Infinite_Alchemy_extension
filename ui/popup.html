@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="dashboard.css" />
+    <style>
+      body {
+        width: 280px;
+        padding: 14px;
+      }
+      .cards {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .card {
+        padding: 10px 12px;
+      }
+      .card .v {
+        font-size: 20px;
+      }
+      .head {
+        font-family: var(--serif);
+        color: var(--gold-bright);
+        font-size: 15px;
+        margin-bottom: 10px;
+        letter-spacing: 1px;
+      }
+      .full {
+        width: 100%;
+        margin-top: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="head">⚗️ 煉製軌跡 <span id="ver" style="font-size: 11px; color: var(--faint)">v1.0.1</span></div>
+    <p class="muted" id="who" style="font-size: 12px; margin: -4px 0 10px"></p>
+    <div class="cards" id="cards"></div>
+    <button class="primary full" id="open">開啟儀表板</button>
+    <button class="ghost full" id="sync">⟳ 更新帳號狀態</button>
+    <button class="ghost full" id="play">前往工坊</button>
+    <p class="muted" id="syncmsg" style="font-size: 11.5px; margin: 8px 0 0"></p>
+    <p class="muted" id="hint" style="font-size: 12px; margin: 10px 0 0"></p>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

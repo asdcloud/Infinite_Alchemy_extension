@@ -1,0 +1,4 @@
+# 儲存庫內一律用 LF，避免在 Windows 上每次都出現整檔變更的假 diff
+* text=auto eol=lf
+*.png binary
+*.zip binary

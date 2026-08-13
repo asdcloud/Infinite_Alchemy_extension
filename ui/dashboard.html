@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <title>煉製軌跡 v1.0.1 · 無限煉製</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="flask">⚗️</span> 煉製軌跡</div>
+      <span class="ver" id="version" title="目前載入的版本。改版後這裡沒變，表示擴充套件還沒重新載入">v1.0.1</span>
+      <div class="spacer"></div>
+      <label class="account" for="account-select">帳號</label>
+      <select id="account-select" title="切換要檢視的煉金師帳號"></select>
+      <button class="primary" id="sync" title="從遊戲讀取這個帳號目前的素材櫃、創生與配方">⟳ 更新</button>
+      <button class="ghost" id="reload">重新整理</button>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-view="lookup">查配方</button>
+      <button class="tab" data-view="plan">怎麼煉</button>
+      <button class="tab" data-view="bag">素材櫃</button>
+      <button class="tab" data-view="recipes">共用配方表</button>
+      <button class="tab" data-view="log">軌跡</button>
+      <button class="tab" data-view="data">資料</button>
+    </nav>
+
+    <div class="syncbar hidden" id="syncbar">
+      <span id="sync-text"></span>
+      <span class="bar"><i id="sync-bar"></i></span>
+      <button class="ghost" id="sync-cancel">取消</button>
+    </div>
+
+    <main>
+      <!-- 怎麼煉（規劃＋族譜合併） -->
+      <section class="view hidden" id="view-plan">
+        <div class="panel">
+          <h2>我要煉出…</h2>
+          <div class="toolbar">
+            <input list="known-words" id="plan-input" placeholder="目標造物，例如：間歇泉" />
+            <datalist id="known-words"></datalist>
+            <select id="plan-mode">
+              <option value="steps">最短路徑（合成次數最少）</option>
+              <option value="missing">最少未知（盡量只用手上有的）</option>
+            </select>
+            <button class="primary" id="plan-go">查怎麼煉</button>
+          </div>
+          <p class="muted" id="plan-basis"></p>
+        </div>
+        <div class="panel hidden" id="plan-result"></div>
+        <div class="panel hidden" id="plan-tree">
+          <h2>路徑樹</h2>
+          <p class="muted">
+            跟上面的步驟是同一條路。停在<b>✔ 已持有</b>的節點就不用再往下煉了；
+            同一個造物常有好幾種做法，點節點上的「<b>另有 N 條配方 ⇄</b>」可以換一條看，步驟表會跟著重算。
+          </p>
+          <div class="tree" id="tree-out"></div>
+        </div>
+        <div class="panel">
+          <h2>現在手上就能煉的已知配方</h2>
+          <p class="muted">材料你都有、共用配方表也確認煉得出來，而且你還沒擁有這個產物——照著做就是白賺。</p>
+          <div class="tablewrap">
+            <table class="log">
+              <thead>
+                <tr><th>材料</th><th>產物</th><th>標記</th><th>發現者</th><th></th></tr>
+              </thead>
+              <tbody id="suggest-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 查配方 -->
+      <section class="view" id="view-lookup">
+        <div class="panel">
+          <h2>合成之前先查一下</h2>
+          <p class="muted">
+            問共用配方表這組材料有沒有人試過，省下白花的魔力。空著材料 B 就是查「萃取」。
+            <b>已知會崩解</b>就別按了；<b>普通崩解但祈禱可成</b>就直接祈禱；煉出來的東西<b>不是你要的</b>也可以直接跳過。
+          </p>
+          <div class="toolbar">
+            <input list="all-words" id="look-a" placeholder="材料 A" />
+            <span class="op">＋</span>
+            <input list="all-words" id="look-b" placeholder="材料 B（留空＝萃取）" />
+            <datalist id="all-words"></datalist>
+            <button class="primary" id="look-go">查詢</button>
+          </div>
+          <div id="look-result"></div>
+        </div>
+      </section>
+
+      <!-- 素材櫃 -->
+      <section class="view hidden" id="view-bag">
+        <div class="cards" id="bag-cards"></div>
+        <div class="panel">
+          <h2>持有的造物</h2>
+          <p class="muted" id="bag-note"></p>
+          <div class="toolbar">
+            <input type="search" id="bag-search" placeholder="搜尋…" />
+            <span class="muted" id="bag-count"></span>
+          </div>
+          <div class="chips" id="bag-list"></div>
+        </div>
+      </section>
+
+      <!-- 軌跡 -->
+      <section class="view hidden" id="view-log">
+        <div class="toolbar">
+          <input type="search" id="log-search" placeholder="搜尋材料或產物…" />
+          <select id="log-filter">
+            <option value="all">全部</option>
+            <option value="success">只看成功</option>
+            <option value="fail">只看崩解</option>
+            <option value="error">只看未執行（魔力不足等）</option>
+            <option value="new">只看首度發現配方</option>
+            <option value="global">只看全服首煉</option>
+            <option value="pray">只看祈禱</option>
+            <option value="refine">只看萃取</option>
+            <option value="live">只看即時記錄的</option>
+            <option value="game">只看從遊戲補回來的</option>
+          </select>
+          <span class="muted" id="log-count"></span>
+        </div>
+        <p class="muted" style="margin: 0 0 12px">
+          這個帳號煉過什麼。<b>即時記錄</b>的那些含崩解原因與魔力消耗；標「<b>遊戲紀錄</b>」的是按「⟳ 更新」
+          從遊戲的煉製紀錄與「我發現的配方」補回來的，遊戲不回溯崩解原因與魔力，所以那兩欄會是空的。
+          <br />
+          <b>遊戲的煉製紀錄只查得到最近約 100 筆</b>（不含「我發現的配方」，那份是完整的）——
+          更早的補不回來，只能靠之後即時記錄累積。
+        </p>
+        <div class="tablewrap">
+          <table class="log">
+            <thead>
+              <tr>
+                <th>時間</th>
+                <th class="col-account">帳號</th>
+                <th>行為</th>
+                <th>投入</th>
+                <th>結果</th>
+                <th>標記</th>
+                <th>魔力</th>
+                <th>獎勵</th>
+              </tr>
+            </thead>
+            <tbody id="log-body"></tbody>
+          </table>
+        </div>
+        <div class="more"><button class="ghost hidden" id="log-more">載入更多</button></div>
+      </section>
+
+      <!-- 共用配方表 -->
+      <section class="view hidden" id="view-recipes">
+        <div class="panel">
+          <h2>共用配方表</h2>
+          <p class="muted">
+            跨帳號共用的整份配方知識：你自己煉過的、更新從遊戲收回來的、別人分享匯入的，全在這裡。
+            <b>崩解的組合也留著</b>——那是最省魔力的知識。
+          </p>
+          <div class="toolbar">
+            <input type="search" id="kb-search" placeholder="搜尋材料或產物…" />
+            <select id="kb-filter">
+              <option value="all">全部</option>
+              <option value="success">只看可成</option>
+              <option value="pray">只看需祈禱</option>
+              <option value="fail">只看已知崩解</option>
+              <option value="mine">只看我發現的</option>
+              <option value="import">只看匯入的</option>
+            </select>
+            <span class="muted" id="kb-count"></span>
+          </div>
+          <div class="tablewrap">
+            <table class="log">
+              <thead>
+                <tr><th>材料</th><th>結果</th><th>判定</th><th>發現者</th><th>來源</th><th></th></tr>
+              </thead>
+              <tbody id="kb-body"></tbody>
+            </table>
+          </div>
+          <div class="more"><button class="ghost hidden" id="kb-more">載入更多</button></div>
+        </div>
+      </section>
+      <!-- 資料 -->
+      <section class="view hidden" id="view-data">
+        <div class="panel">
+          <h2>分享配方</h2>
+          <p class="muted">
+            <b>只匯出共用配方表</b>——不含你的軌跡、素材櫃、帳號 id，檔案也小很多。
+            這是要傳給別人的那一份；對方匯入後，他的規劃器就知道你會的配方。
+          </p>
+          <div class="row">
+            <button class="primary" id="export-share">📤 匯出配方（分享用）</button>
+            <span class="muted" id="share-msg"></span>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>備份</h2>
+          <p class="muted">
+            完整備份：全部帳號的軌跡＋共用配方表＋遊戲回應原文，用來換電腦或還原自己的資料。
+            CSV 只匯出<b>目前選定帳號</b>的軌跡，方便丟進試算表。
+          </p>
+          <div class="row">
+            <button class="ghost" id="export-json">匯出 JSON（完整備份）</button>
+            <button class="ghost" id="export-csv">匯出 CSV（目前帳號軌跡）</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>匯入</h2>
+          <p class="muted">
+            吃進別人（或你自己備份）的檔案。<b>只併共用配方表</b>，不會動到你自己的軌跡——
+            大家互相匯入就能一起把煉金表補完整。
+          </p>
+          <div class="row">
+            <input type="file" id="import-file" accept="application/json" />
+            <span id="import-msg" class="muted"></span>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>更新帳號狀態</h2>
+          <p class="muted">
+            讀回這個帳號現在的狀態：素材櫃、我的創生，以及遊戲保存的<b>最近合成紀錄</b>（含失敗與祈禱）→ 直接進軌跡。
+            第一次使用、或很久沒開擴充套件時跑一次。需要開著遊戲分頁。
+          </p>
+          <ul class="muted notes">
+            <li>讀的都是「我自己的」：帳號、素材櫃、原初五元素、我的創生、我的合成紀錄，以及<b>所有由我首度發現的配方</b>。</li>
+            <li>配方是用分頁一次拿一批（<code>/me/recipes?offset=</code>），<b>不會對每個造物逐一發問</b>。</li>
+          </ul>
+          <div class="row">
+            <button class="primary" id="sync-run">⟳ 更新帳號狀態</button>
+            <button class="ghost" id="rebuild">由軌跡重建配方表</button>
+            <button class="ghost" id="diagnose">診斷</button>
+            <span id="sync-msg" class="muted"></span>
+          </div>
+          <p class="muted" style="margin: 8px 0 0">
+            「更新」抓不到東西時按「診斷」——它會把每支端點的原始回應攤開來（HTTP 狀態、欄位名、筆數），
+            一眼就看得出是請求失敗、還是欄位名跟預期不同。
+          </p>
+          <pre id="diag-out" class="diag hidden"></pre>
+        </div>
+        <div class="panel danger">
+          <h2>清空</h2>
+          <p class="muted">
+            兩個都無法復原，<b>建議先按上面的「匯出 JSON」備份</b>。
+          </p>
+          <ul class="muted notes">
+            <li><b>只清軌跡</b>：刪掉煉製軌跡，但保留共用配方表、素材櫃與帳號狀態。</li>
+            <li>
+              <b>完全重置</b>：軌跡、共用配方表、素材櫃、帳號狀態、帳號名冊全部清掉，
+              擴充套件回到<b>剛安裝的狀態</b>——要測「全新帳號按更新會怎樣」就用這個。
+            </li>
+          </ul>
+          <div class="row">
+            <button class="danger-btn" id="clear-all">只清軌跡</button>
+            <button class="danger-btn" id="reset-all">完全重置（像剛安裝一樣）</button>
+            <span id="clear-msg" class="muted"></span>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>說明</h2>
+          <ul class="muted notes">
+            <li>資料只存在你自己的瀏覽器（擴充套件的 IndexedDB），不會上傳任何地方。</li>
+            <li>
+              <b>共用配方表是跨帳號共用的</b>（配方不因帳號而異，只標記是誰煉出來的）；
+              <b>持有物、金錢、魔力與軌跡是分帳號的</b>。右上角可切換帳號。
+            </li>
+            <li>帳號以 <code>/api/me</code> 的 id 分辨，改名號不會讓紀錄斷成兩個人。</li>
+            <li>除了你按「更新」以外，擴充套件不會主動對遊戲發送任何請求。</li>
+            <li>在遊戲裡點開造物看配方時會順手把配方收進共用配方表，逛遊戲就會自動長知識。</li>
+            <li>「未執行」是伺服器擋下的請求（魔力不足、素材櫃滿等），不算失敗、不扣魔力。</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="dashboard.js"></script>
+  </body>
+</html>
