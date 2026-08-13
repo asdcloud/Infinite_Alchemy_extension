@@ -18,13 +18,17 @@
 
 ## 安裝
 
-1. 開啟 `chrome://extensions/`（Edge 是 `edge://extensions/`）
-2. 右上角開啟「**開發人員模式**」
-3. 點「**載入未封裝項目**」，選擇本資料夾
-4. 重新整理遊戲頁面
-5. 按浮層或儀表板右上角的「**⟳ 更新**」跑一次
+1. 到 [Releases](../../releases) 下載最新版的 zip 並解壓縮（或直接 clone 這個 repo）
+2. 開啟 `chrome://extensions/`（Edge 是 `edge://extensions/`）
+3. 右上角開啟「**開發人員模式**」
+4. 點「**載入未封裝項目**」，選擇解壓縮後的資料夾
+5. 重新整理遊戲頁面
+6. 按浮層或儀表板右上角的「**⟳ 更新**」跑一次
 
-需要 Chrome / Edge 111 以上版本。
+需要 Chrome / Edge 111 以上版本。更新紀錄見 [CHANGELOG.md](CHANGELOG.md)。
+
+> 升版時**沿用同一個資料夾**（把新檔案覆蓋上去），再到 `chrome://extensions` 按「重新載入」——
+> 換資料夾會被 Chrome 當成另一個擴充套件，既有資料不會跟過來。
 
 ## 兩層資料
 
