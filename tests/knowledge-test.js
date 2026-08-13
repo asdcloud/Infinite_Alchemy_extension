@@ -343,6 +343,50 @@ try {
 }
 check('互相循環的配方不會無限迴圈', cycOk);
 
+out.push('[局部搜尋：撿回貪婪漏掉的共用]');
+// 己 有兩條配方：丙＋丁 自己算比較便宜（3 步），甲＋庚 自己算比較貴（4 步）。
+// 但辛 本來就要煉甲與乙，所以走比較「貴」的那條反而總步數更少。
+// 貪婪只看「這一條自己多貴」，看不到「用它就順便省掉別的」——局部搜尋要能撿回來。
+const KB4 = new Map();
+const put4 = (inputs, result) => {
+  const e = fromAttempt(attempt({ inputs, result }));
+  const next = e.merge(KB4.get(e.key));
+  if (next) KB4.set(e.key, next);
+};
+put4(['水', '火'], '甲');
+put4(['土', '風'], '乙');
+put4(['水', '土'], '丙');
+put4(['火', '風'], '丁');
+put4(['甲', '乙'], '戊');
+put4(['乙', '雷'], '庚');
+put4(['丙', '丁'], '己'); // 己 的第一條：3 步
+put4(['甲', '庚'], '己'); // 己 的第二條：4 步，但跟戊共用甲、乙
+put4(['戊', '己'], '辛');
+
+const by4 = recipesByResult([...KB4.values()]);
+const ownedC = new Set(['水', '火', '土', '風', '雷']);
+check('己 真的有兩條配方', (by4.get('己') || []).length === 2, String((by4.get('己') || []).length));
+const p9 = plan('辛', ownedC, by4, 'steps');
+check('辛 規劃成功', p9.ok === true, JSON.stringify(p9.missing));
+// 走 丙＋丁 那條：甲乙戊丙丁己辛 ＝ 7 步；走 甲＋庚 那條：甲乙戊庚己辛 ＝ 6 步
+check('選到會共用材料的那條（6 步而不是 7 步）', p9.stepCount === 6, String(p9.stepCount));
+check(
+  '步驟裡沒有白煉的丙、丁',
+  !p9.steps.some((s) => s.result === '丙' || s.result === '丁'),
+  JSON.stringify(p9.steps.map((s) => s.result))
+);
+
+out.push('[solve 的快取以容器識別碼為鍵]');
+// 就地塞新配方進去**不會**被看到——這是刻意的契約，換資料請重建一個新的 Map
+// （儀表板本來就是每次重建）。這條測試把契約釘住，免得哪天有人改成就地修改。
+by4.set('壬', [
+  { key: 'combine:水|雷', action: 'combine', inputs: ['水', '雷'], result: '壬', emoji: null, needsPray: false, discoveredBy: null },
+]);
+check('就地改同一個 Map 不會被看到', plan('壬', ownedC, by4, 'steps').ok === false, '');
+put4(['水', '雷'], '壬');
+const by5 = recipesByResult([...KB4.values()]);
+check('重建一個新的 Map 就看得到', plan('壬', ownedC, by5, 'steps').ok === true, '');
+
 out.unshift(fail === 0 ? `RESULT: ALL PASS (${pass})` : `RESULT: ${fail} FAILED / ${pass} passed`);
 document.getElementById('out').textContent = out.join('\n');
 document.title = fail === 0 ? 'PASS' : 'FAIL';
