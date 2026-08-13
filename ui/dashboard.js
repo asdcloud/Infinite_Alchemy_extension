@@ -872,6 +872,15 @@ function syncErrorText(r) {
   return SYNC_ERROR_HELP[e] || `無法開始更新：${e || '未知錯誤'}`;
 }
 
+// 有新版本才浮出來的那顆；按下去開 GitHub 的發布頁，要不要更新自己決定
+function showUpdate(u) {
+  if (!u || !u.hasUpdate) return;
+  const btn = $('update-btn');
+  btn.textContent = `⬆ 有新版本 v${u.latest}`;
+  btn.title = `目前是 v${u.current}，GitHub 上已經有 v${u.latest}。點一下開發布頁。`;
+  btn.classList.remove('hidden');
+}
+
 async function startSync() {
   const msg = $('sync-msg');
   if (msg) msg.textContent = '';
@@ -906,6 +915,7 @@ chrome.runtime.onMessage.addListener((m) => {
     return;
   }
   if (m.type !== 'ia-progress') return;
+  if (m.update) showUpdate(m.update);
   const bar = $('syncbar');
   bar.classList.remove('hidden');
   const pct = m.total ? Math.round((m.done / m.total) * 100) : m.phase === 'done' ? 100 : 0;
@@ -1127,6 +1137,10 @@ $('account-select').addEventListener('change', async (e) => {
 $('sync').addEventListener('click', () => startSync());
 $('sync-run').addEventListener('click', () => startSync());
 $('sync-cancel').addEventListener('click', () => cmd({ type: 'ia-cmd', cmd: 'sync-cancel' }));
+
+// 版本提示：只讀上次按「更新」時查到的結果，開儀表板不會自己去打 GitHub
+$('update-btn').addEventListener('click', () => cmd({ type: 'ia-cmd', cmd: 'open-release' }));
+cmd({ type: 'ia-cmd', cmd: 'check-update', opts: { cachedOnly: true } }).then(showUpdate);
 
 // 全服動態收集（開關存在 chrome.storage.local，遊戲分頁的 content script 直接讀得到）
 async function renderFeed() {

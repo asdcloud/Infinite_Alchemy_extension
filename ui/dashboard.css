@@ -144,6 +144,14 @@ button.danger-btn {
   color: #ffbdb0;
   border-color: #7a3226;
 }
+button.update {
+  background: rgba(224, 177, 85, 0.13);
+  color: var(--gold-bright);
+  border-color: #7a5a22;
+}
+button.update:hover {
+  background: rgba(224, 177, 85, 0.24);
+}
 
 input,
 select {

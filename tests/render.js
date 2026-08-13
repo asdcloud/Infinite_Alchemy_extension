@@ -8,7 +8,7 @@ localStorage.clear();
 window.chrome = {
   runtime: {
     id: 'test',
-    onMessage: { addListener() {} },
+    onMessage: { addListener(f) { window.__onMsg = f; } },
     sendMessage(m, cb) {
       if (typeof cb === 'function') cb({ ok: true, merged: 0, total: 0, report: 'diag' });
     },
@@ -95,6 +95,18 @@ sel.value = 'A2';
 sel.dispatchEvent(new Event('change'));
 await wait(200);
 out.push('切小號 → 素材櫃=' + txt('#bag-count') + ' / 軌跡=' + txt('#log-count') + ' / 共用配方表=' + txt('#kb-count'));
+
+// 版本提示：平常藏著，更新跑完帶回「有新版本」才浮出來
+const updBtn = document.getElementById('update-btn');
+out.push('版本提示(平常) = ' + (updBtn.classList.contains('hidden') ? '藏著' : '露出來了'));
+window.__onMsg({
+  type: 'ia-progress',
+  phase: 'done',
+  stats: {},
+  update: { hasUpdate: true, latest: '9.9.9', current: '1.1.2' },
+});
+await wait(120);
+out.push('版本提示(有新版) = ' + (updBtn.classList.contains('hidden') ? '還藏著' : txt('#update-btn')));
 
 out.push('errors=[' + log.join(' | ') + ']');
 document.title = log.length ? 'FAIL' : 'PASS';

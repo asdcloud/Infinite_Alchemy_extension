@@ -247,6 +247,72 @@ check(
 );
 check('有廣播 ia-reset 讓開著的頁面重載', broadcasts.some((m) => m && m.type === 'ia-reset'), JSON.stringify(broadcasts));
 
+out.push('[版本檢查]');
+// 只攔 api.github.com，其他 fetch（例如下面要讀 content.js 原始碼）照舊
+const realFetch = window.fetch.bind(window);
+let ghCalls = 0;
+const okRelease = () =>
+  new Response(
+    JSON.stringify({ tag_name: 'v9.9.9', html_url: 'https://github.com/x/y/releases/tag/v9.9.9' }),
+    { status: 200 }
+  );
+let ghResponse = okRelease;
+window.fetch = (url, init) => {
+  if (String(url).includes('api.github.com')) {
+    ghCalls++;
+    return Promise.resolve(ghResponse());
+  }
+  return realFetch(url, init);
+};
+
+// 更新跑完會順手查一次（這時還沒查過，所以真的會打出去）
+broadcasts.length = 0;
+await send(
+  { type: 'ia-sync-progress', phase: 'done', done: 6, total: 6, stats: { discoveries: 1 } },
+  gameSender
+);
+const doneMsg = broadcasts.filter((m) => m && m.type === 'ia-progress' && m.phase === 'done').pop();
+check('按更新跑完會順手查一次', ghCalls === 1, String(ghCalls));
+check('更新完成的廣播帶著版本檢查結果', !!(doneMsg && doneMsg.update), JSON.stringify(doneMsg));
+check('而且說得出有新版本', doneMsg && doneMsg.update.hasUpdate === true, JSON.stringify(doneMsg && doneMsg.update));
+check('版本號是去掉 v 的', doneMsg && doneMsg.update.latest === '9.9.9', JSON.stringify(doneMsg && doneMsg.update));
+
+res = await send({ type: 'ia-cmd', cmd: 'check-update' }, dashSender);
+check('一小時內不會再打一次', ghCalls === 1, String(ghCalls));
+check('照樣說得出有新版本（讀存下來的）', res.r && res.r.hasUpdate === true, JSON.stringify(res.r));
+
+res = await send({ type: 'ia-cmd', cmd: 'check-update', opts: { cachedOnly: true } }, dashSender);
+check('cachedOnly 一定不打 GitHub', ghCalls === 1, String(ghCalls));
+check('cachedOnly 也回得出結果', res.r && res.r.hasUpdate === true, JSON.stringify(res.r));
+
+out.push('[開發布頁]');
+const createdBefore = calls.created.length;
+res = await send({ type: 'ia-cmd', cmd: 'open-release' }, dashSender);
+check('開了一個分頁', calls.created.length === createdBefore + 1, JSON.stringify(calls.created));
+check(
+  '開的是那一版的發布頁',
+  calls.created[calls.created.length - 1].url === 'https://github.com/x/y/releases/tag/v9.9.9',
+  JSON.stringify(calls.created[calls.created.length - 1])
+);
+
+out.push('[沒有新版本／查不到時]');
+ghResponse = () => new Response(JSON.stringify({ tag_name: 'v1.0.0', html_url: 'https://github.com/x/y/releases/tag/v1.0.0' }), { status: 200 });
+res = await send({ type: 'ia-cmd', cmd: 'check-update', opts: { force: true } }, dashSender);
+check('force 會重新查一次', ghCalls === 2, String(ghCalls));
+check('版本一樣就不提示更新', res.r && res.r.ok && res.r.hasUpdate === false, JSON.stringify(res.r));
+
+ghResponse = () => new Response('nope', { status: 503 });
+res = await send({ type: 'ia-cmd', cmd: 'check-update', opts: { force: true } }, dashSender);
+check('GitHub 掛掉也一定會回覆', res.replied === true, JSON.stringify(res));
+check('查不到就當作沒有更新，不會誤報', res.r && res.r.hasUpdate === false, JSON.stringify(res.r));
+check('查不到會說明原因', res.r && !res.r.ok && !!res.r.error, JSON.stringify(res.r));
+
+ghResponse = () => new Response(JSON.stringify({ tag_name: 'v9.9.9', prerelease: true }), { status: 200 });
+res = await send({ type: 'ia-cmd', cmd: 'check-update', opts: { force: true } }, dashSender);
+check('預發布不算新版本', res.r && res.r.hasUpdate === false, JSON.stringify(res.r));
+
+ghResponse = okRelease;
+
 out.push('[content.js 只會打白名單上的端點]');
 // 直接掃 content.js 裡所有的 API 路徑字面值——不管寫成什麼形式都抓得到，
 // 這樣以後有人（包括我）加了新端點或把逐一走訪造物的迴圈放回來，測試就會紅。

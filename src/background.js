@@ -26,6 +26,7 @@ import {
   SOURCE,
 } from './knowledge.js';
 import { PRIMORDIALS } from './analysis.js';
+import { RELEASE_API, RELEASE_PAGE, isNewer, parseRelease } from './update.js';
 
 const GAME_ORIGIN = 'https://pillars-of-creation.funtuan.work';
 
@@ -603,10 +604,53 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
+// ── 版本檢查 ──────────────────────────────────────────
+//
+// 只在按「更新」時順手查一次，查完存起來；分頁重開只讀存下來的那份，
+// 不會每開一次遊戲就打一次 GitHub（未登入的 API 一小時只給 60 次）。
+const UPDATE_TTL_MS = 60 * 60 * 1000;
+
+async function checkUpdate(opts = {}) {
+  const current = chrome.runtime.getManifest().version;
+  const cached = await getMeta('update', null);
+  const fresh = cached && Date.now() - (cached.checkedAt || 0) < UPDATE_TTL_MS;
+  if (opts.cachedOnly || (fresh && !opts.force)) {
+    if (!cached) return { ok: true, current, hasUpdate: false };
+    return { ok: true, ...cached, current, hasUpdate: isNewer(cached.latest, current) };
+  }
+
+  let info;
+  try {
+    const res = await fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    info = parseRelease(await res.json());
+  } catch (e) {
+    // 查不到就算了，不要害整趟更新看起來失敗
+    return { ok: false, current, hasUpdate: false, error: (e && e.message) || String(e) };
+  }
+  if (!info) return { ok: false, current, hasUpdate: false, error: '沒有正式發布的版本' };
+
+  const stored = { ...info, checkedAt: Date.now() };
+  await setMeta('update', stored);
+  return { ok: true, ...stored, current, hasUpdate: isNewer(info.latest, current) };
+}
+
+/** 開 GitHub 的最新發布頁，要不要下載由使用者自己決定 */
+async function openRelease() {
+  const info = (await getMeta('update', null)) || {};
+  const url = info.page || RELEASE_PAGE;
+  await chrome.tabs.create({ url });
+  return { ok: true, page: url };
+}
+
 async function handleCommand(msg) {
   switch (msg.cmd) {
     case 'ping':
       return { ok: true, version: chrome.runtime.getManifest().version, contract: 2 };
+    case 'check-update':
+      return checkUpdate(msg.opts || {});
+    case 'open-release':
+      return openRelease();
     case 'sync-start':
       return startSync(msg.opts || {});
     case 'sync-cancel':
@@ -682,14 +726,17 @@ async function cancelSync() {
 async function handleSyncProgress(msg) {
   sync.progress = msg;
   sync.beatAt = Date.now(); // 心跳：有進度就代表還活著
+  let update = null;
   if (msg.phase === 'done' || msg.phase === 'error' || msg.phase === 'cancelled') {
     sync.running = false;
     if (msg.phase === 'done') {
       const account = (await getMeta('account', null)) || {};
       await mergeAccountState(account.id, { lastSync: Date.now(), lastSyncStats: msg.stats || null });
+      // 順手看一眼 GitHub 上有沒有新版本；查不到就當沒這回事，不影響更新結果
+      update = await checkUpdate();
     }
   }
-  broadcast({ ...msg, type: 'ia-progress' });
+  broadcast({ ...msg, type: 'ia-progress', update });
   return { ok: true };
 }
 

@@ -176,6 +176,29 @@ $('.sync').click();
 check('按下去會叫 runSync', syncRuns === 1, String(syncRuns));
 check('進度列跟著露出來', !$('.prog').classList.contains('hide'));
 
+out.push('[有新版本才浮出來的那顆]');
+check('平常藏著', $('.upd').classList.contains('hide'));
+check('掛載時只讀存下來的，不會叫背景去打 GitHub',
+  cmds.some((m) => m.cmd === 'check-update' && m.opts && m.opts.cachedOnly === true), JSON.stringify(cmds.filter((m) => m.cmd === 'check-update')));
+
+window.dispatchEvent(new CustomEvent('ia-sync-progress', {
+  detail: { phase: 'done', done: 6, total: 6, stats: {}, update: { hasUpdate: false, latest: '1.1.3', current: '1.1.3' } },
+}));
+await wait(20);
+check('版本一樣就不要冒出來', $('.upd').classList.contains('hide'));
+
+window.dispatchEvent(new CustomEvent('ia-sync-progress', {
+  detail: { phase: 'done', done: 6, total: 6, stats: {}, update: { hasUpdate: true, latest: '9.9.9', current: '1.1.3' } },
+}));
+await wait(20);
+check('有新版本就浮出來', !$('.upd').classList.contains('hide'));
+check('寫著新舊版本號', $('.updbtn').textContent === '⬆ 有新版本 v9.9.9（目前 v1.1.3）', $('.updbtn').textContent);
+
+$('.updbtn').click();
+await wait(20);
+check('按下去是叫背景開發布頁', cmds.some((m) => m.cmd === 'open-release'), JSON.stringify(cmds.slice(-3)));
+check('不會順便把浮層收起來', !$('.wrap').classList.contains('collapsed'));
+
 // ── 重開分頁：storage 裡已經是開的 ──
 out.push('[重開分頁時讀回設定]');
 document.getElementById(HOST).remove();

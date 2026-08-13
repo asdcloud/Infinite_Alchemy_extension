@@ -79,6 +79,13 @@ const CSS = `
 .sw input:checked + i { background: rgba(224,177,85,.25); border-color: #e0b155; }
 .sw input:checked + i::after { transform: translateX(14px); background: #f7d183; }
 .sw input:focus-visible + i { border-color: #f7d183; }
+.upd { margin-top: 8px; }
+.upd button {
+  all: unset; display: block; box-sizing: border-box; width: 100%; text-align: center; cursor: pointer;
+  padding: 5px 8px; border-radius: 8px; font-size: 12px;
+  color: #ffd9a3; border: 1px solid #7a5a22; background: rgba(224,177,85,.13);
+}
+.upd button:hover { background: rgba(224,177,85,.22); }
 .prog { margin-top: 8px; font-size: 11.5px; color: #b39c76; }
 .bar { height: 3px; background: #1c1610; border-radius: 2px; overflow: hidden; margin-top: 3px; }
 .bar i { display: block; height: 100%; background: linear-gradient(90deg,#ff7f38,#e0b155); width: 0; }
@@ -108,6 +115,7 @@ export function mountOverlay(ctx) {
       </div>
       <div class="verdict dim">在遊戲裡點材料，這裡就會顯示結果</div>
       <div class="prog hide"><span class="ptext"></span><span class="bar"><i></i></span></div>
+      <div class="upd hide"><button class="updbtn"></button></div>
       <div class="feed">
         <span class="lbl" title="開啟後每 30 秒讀一次全服最新的合成紀錄，把別人的配方也收進共用配方表。只進配方表，不會進你的軌跡。">全服動態收集</span>
         <span class="st">關閉</span>
@@ -126,6 +134,8 @@ export function mountOverlay(ctx) {
     ptext: $('.ptext'),
     bar: $('.bar i'),
     fold: $('.fold'),
+    upd: $('.upd'),
+    updBtn: $('.updbtn'),
     feedBox: $('.fd'),
     feedState: $('.feed .st'),
     feedLabel: $('.feed .lbl'),
@@ -165,6 +175,7 @@ export function mountOverlay(ctx) {
 
   window.addEventListener('ia-sync-progress', (e) => {
     const p = e.detail || {};
+    if (p.update) showUpdate(p.update);
     els.prog.classList.remove('hide');
     const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
     els.bar.style.width = `${pct}%`;
@@ -182,6 +193,19 @@ export function mountOverlay(ctx) {
       els.ptext.textContent = `${p.label || '同步中'}${p.total ? `（${p.done}/${p.total}）` : ''}`;
     }
   });
+
+  // ── 有新版本時浮出來的那顆 ──
+  // 按下去就開 GitHub 的發布頁，要不要更新自己決定
+  function showUpdate(u) {
+    if (!u || !u.hasUpdate) return;
+    els.upd.classList.remove('hide');
+    els.updBtn.textContent = `⬆ 有新版本 v${u.latest}（目前 v${u.current}）`;
+  }
+  els.updBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    ctx.sendAsync({ type: 'ia-cmd', cmd: 'open-release' });
+  });
+  ctx.sendAsync({ type: 'ia-cmd', cmd: 'check-update', opts: { cachedOnly: true } }).then(showUpdate);
 
   // ── 偵測煉製台上放了什麼 ──
   //
