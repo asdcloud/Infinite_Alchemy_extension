@@ -82,6 +82,7 @@ function makeHeap(cmp) {
  * @param {Set<string>} owned 目前持有（含五原質）
  * @param {Map<string, Array>} byResult knowledge.recipesByResult() 的輸出
  * @param {string} mode 'steps' | 'missing'
+ * @param {{keep?: string}} opts keep＝拆環時不准動的那個造物（通常是使用者要查的目標）
  * @returns {Map<string, {steps:Set, missing:Set, recipe:object|null, kind:string}>}
  * 產品端只透過 plan() 使用；獨立匯出是為了讓測試能直接驗這顆引擎。
  *
@@ -90,7 +91,7 @@ function makeHeap(cmp) {
  * （這個問題等價於 directed Steiner tree，NP-hard）。plan() 會再跑一次
  * 局部搜尋把明顯的浪費修掉。
  */
-export function solve(owned, byResult, mode = 'steps') {
+export function solve(owned, byResult, mode = 'steps', opts = {}) {
   const cmp = cmpBy(mode);
   const settled = new Map();
 
@@ -152,11 +153,56 @@ export function solve(owned, byResult, mode = 'steps') {
 
   let guard = 0;
   const maxRounds = universe.size + allRecipes.length + 1000;
-  while (ready.size && guard++ < maxRounds) {
-    const best = ready.pop();
-    // 已經被更便宜的配方結算掉了就跳過（堆裡的舊項目留著不刪，取出來再判斷比較快）
-    if (settled.has(best.recipe.result)) continue;
-    settle(best.recipe.result, best);
+  const run = () => {
+    while (ready.size && guard++ < maxRounds) {
+      const best = ready.pop();
+      // 已經被更便宜的配方結算掉了就跳過（堆裡的舊項目留著不刪，取出來再判斷比較快）
+      if (settled.has(best.recipe.result)) continue;
+      settle(best.recipe.result, best);
+    }
+  };
+  run();
+
+  // ── 拆環 ──
+  //
+  // 跑完還沒結算的造物，代表它每一條做法最後都會繞回自己。例：
+  //   目標 X ← D＋F，而 F ← A＋X。要有 F 得先有 X，要有 X 得先有 F。
+  //
+  // 處理方式是「把最後接成環的那一步拔掉」：當作 A＋X＝F 不存在，F 因此變成
+  // 這條路上的**基本材料**（沒有子節點的葉子，自己想辦法弄到就好），X 就接得下去了：
+  //   A＋B＝C、C＋B＝D、D＋F＝X
+  // 這比直接回一句「煉不出來」有用得多。F 不算「缺料」——它有配方，
+  // 只是那條會繞回目標，所以在這條路上不展開。
+  //
+  // 一次只拆一個、拆完再跑，才不會把「其實只是排在後面」的造物也一起打成基本材料。
+  // opts.keep 是不准拆的那個（通常就是使用者要查的目標，拆了就沒答案可看了）。
+  const keep = opts.keep;
+  let rounds = 0;
+  for (;;) {
+    const stuck = [];
+    for (const w of universe) if (!settled.has(w)) stuck.push(w);
+    if (!stuck.length || rounds++ > stuck.length + 5) break;
+
+    let pick = null;
+    let fewest = Infinity;
+    for (const w of stuck) {
+      if (w === keep) continue;
+      // 挑「離做得出來最近」的那個下手：它的配方裡還沒結算的材料最少
+      let n = Infinity;
+      for (const r of byResult.get(w) || []) {
+        const un = new Set(r.inputs.filter((i) => !settled.has(i))).size;
+        if (un < n) n = un;
+      }
+      if (n < fewest) {
+        fewest = n;
+        pick = w;
+      }
+    }
+    if (pick == null) break; // 只剩不准拆的那個，那就真的沒辦法
+    // 拆掉之後它就跟「沒人煉得出來」的材料同一性質：一個葉節點，自己想辦法弄到
+    // （市集買得到就買，或等別人發現做法）。
+    settle(pick, { steps: new Set(), missing: new Set([pick]), recipe: null, kind: 'missing' });
+    run();
   }
 
   return settled;
@@ -169,10 +215,11 @@ export function solve(owned, byResult, mode = 'steps') {
 //
 // 以 byResult 與 owned 這兩個**容器本身**當鍵：儀表板每次資料變動都是重建一個新的
 // Map／Set，識別碼一換就等於自動失效，不必手動管理，WeakMap 也不會漏記憶體。
-// ⚠ 反過來說，**就地修改**同一個 Map／Set 不會讓快取失效——要換資料請重建。
+// ⚠ 反過來說，**就地修改**同一個 Map／Set 不保證會被看到（結算結果是舊的，
+//   但底下的局部搜尋找替代配方時讀的是當下的 Map）。要換資料一律重建。
 const solveCache = new WeakMap();
 
-function cachedSolve(ownedSet, byResult, mode) {
+function cachedSolve(ownedSet, byResult, mode, keep) {
   let byOwned = solveCache.get(byResult);
   if (!byOwned) {
     byOwned = new WeakMap();
@@ -183,43 +230,59 @@ function cachedSolve(ownedSet, byResult, mode) {
     byMode = new Map();
     byOwned.set(ownedSet, byMode);
   }
-  if (!byMode.has(mode)) byMode.set(mode, solve(ownedSet, byResult, mode));
-  return byMode.get(mode);
+  // 保護某個目標不被拆環的那份要另外存，不然會蓋掉通用的那份
+  const k = keep ? `${mode} ${keep}` : mode;
+  if (!byMode.has(k)) byMode.set(k, solve(ownedSet, byResult, mode, keep ? { keep } : {}));
+  return byMode.get(k);
 }
 
-/** 照著 chosen（造物 → 配方；沒指定就用 solve 選的那條）從目標往下展開 */
+/**
+ * 照著 chosen（造物 → 配方；沒指定就用 solve 選的那條）從目標往下展開。
+ *
+ * 會回報 cyclic：某個造物繞了一圈又要用到自己。solve() 自己選的那份不可能有環
+ * （成本由低往高結算，材料一定比產物早結算），但使用者換過配方之後就可能，
+ * 所以下面的局部搜尋一定要看這個旗標，不然它會覺得「繞回去比較短」而選中環。
+ */
 function collect(target, chosen, settled) {
   const needed = new Map();
   const missing = new Set();
   const usedOwned = new Set();
-  const stack = [target];
-  const seen = new Set();
-  while (stack.length) {
-    const w = stack.pop();
-    if (seen.has(w)) continue;
-    seen.add(w);
+  let cyclic = false;
+  const done = new Set();
+
+  const walk = (w, ancestors) => {
+    if (ancestors.has(w)) {
+      cyclic = true;
+      return;
+    }
+    if (done.has(w)) return;
+    done.add(w);
     const e = settled.get(w);
     if (!e) {
       missing.add(w);
-      continue;
+      return;
     }
     if (e.kind === 'owned') {
       usedOwned.add(w);
-      continue;
+      return;
     }
     if (e.kind === 'missing') {
       missing.add(w);
-      continue;
+      return;
     }
     const r = chosen.get(w) || e.recipe;
     if (!r) {
       missing.add(w);
-      continue;
+      return;
     }
     needed.set(w, r);
-    for (const inp of r.inputs) stack.push(inp);
-  }
-  return { needed, missing, usedOwned };
+    const next = new Set(ancestors);
+    next.add(w);
+    for (const inp of r.inputs) walk(inp, next);
+  };
+  walk(target, new Set());
+
+  return { needed, missing, usedOwned, cyclic };
 }
 
 /**
@@ -231,12 +294,15 @@ function collect(target, chosen, settled) {
  */
 const EVAL_BUDGET = 4000; // 展開次數上限，免得配方多又深的目標算太久
 
-function refine(target, settled, byResult, mode, rounds = 4) {
-  const worse =
-    mode === 'missing'
-      ? (a, b) => a.missing.size - b.missing.size || a.needed.size - b.needed.size
-      : (a, b) => a.needed.size - b.needed.size || a.missing.size - b.missing.size;
+/** 兩份路徑誰比較好：最短路徑先比步數，最少未知先比缺料 */
+function cmpPlan(mode) {
+  return mode === 'missing'
+    ? (a, b) => a.missing.size - b.missing.size || a.needed.size - b.needed.size
+    : (a, b) => a.needed.size - b.needed.size || a.missing.size - b.missing.size;
+}
 
+function refine(target, settled, byResult, mode, rounds = 4) {
+  const worse = cmpPlan(mode);
   const chosen = new Map();
   let cur = collect(target, chosen, settled);
   let evals = 0;
@@ -251,8 +317,10 @@ function refine(target, settled, byResult, mode, rounds = 4) {
         chosen.set(w, alt);
         evals++;
         const next = collect(target, chosen, settled);
+        // 有環的一律不要——繞回自己的路照著做不出來，而且環被截斷後步數看起來反而比較少，
+        // 不擋掉的話局部搜尋會主動挑中它。
         // next.needed 還留著 w 才算數：換完就把自己弄不見的那種不是改良，是走岔了
-        if (next.needed.has(w) && worse(next, cur) < 0) {
+        if (!next.cyclic && next.needed.has(w) && worse(next, cur) < 0) {
           cur = next;
           improved = true;
         } else if (now) {
@@ -276,23 +344,44 @@ export function plan(target, owned, byResult, mode = 'steps') {
   if (ownedSet.has(target)) {
     return { ok: true, target, mode, steps: [], stepCount: 0, missing: [], usedOwned: [target], alreadyOwned: true };
   }
-  const settled = cachedSolve(ownedSet, byResult, mode);
-  const entry = settled.get(target);
-  if (!entry || entry.kind === 'missing') {
+  // 這顆引擎是啟發式的，結算順序不同常常會找到不一樣的路。所以兩種順序都算一次，
+  // 再照**這次要的標準**挑比較好的那份——不然會出現「最少未知」反而缺得比
+  // 「最短路徑」還多的怪事。兩份都有快取，多算這一次幾乎不花時間。
+  const worse = cmpPlan(mode);
+  let best = null;
+  let fallbackEntry = null;
+  for (const m of ['steps', 'missing']) {
+    let settled = cachedSolve(ownedSet, byResult, m);
+    let entry = settled.get(target);
+    // 目標自己被當成拆環的犧牲品了 → 換一份「不准拆它」的答案，
+    // 改拆別的地方，這樣才有路徑可以給
+    if ((!entry || entry.kind === 'missing') && byResult.has(target)) {
+      settled = cachedSolve(ownedSet, byResult, m, target);
+      entry = settled.get(target);
+    }
+    if (!entry || entry.kind === 'missing') {
+      fallbackEntry = fallbackEntry || entry;
+      continue;
+    }
+    // 從目標往回收集要動手煉的節點，再跑一次局部搜尋把貪婪漏掉的共用撿回來
+    const got = refine(target, settled, byResult, mode);
+    if (!best || worse(got, best) < 0) best = got;
+  }
+  if (!best) {
     return {
       ok: false,
       target,
       mode,
       steps: [],
       stepCount: 0,
-      missing: entry ? [...entry.missing] : [target],
+      missing: fallbackEntry ? [...fallbackEntry.missing] : [target],
       usedOwned: [],
-      reason: byResult.has(target) ? '共用配方表裡的配方湊不齊材料' : '共用配方表裡還沒有這個造物的配方',
+      reason: byResult.has(target)
+        ? '共用配方表裡的配方湊不齊材料，或是每一條做法最後都繞回它自己'
+        : '共用配方表裡還沒有這個造物的配方',
     };
   }
-
-  // 從目標往回收集要動手煉的節點，再跑一次局部搜尋把貪婪漏掉的共用撿回來
-  const { needed, missing, usedOwned } = refine(target, settled, byResult, mode);
+  const { needed, missing, usedOwned } = best;
 
   // 拓撲排序：材料都備妥的步驟先做
   const have = new Set([...usedOwned, ...missing]);

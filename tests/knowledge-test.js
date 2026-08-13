@@ -11,6 +11,7 @@ import {
   SOURCE,
 } from '../src/knowledge.js';
 import { plan, solve, knownCombosFromOwned } from '../src/planner.js';
+import { computeDepths, buildTree } from '../src/analysis.js';
 
 const out = [];
 let pass = 0;
@@ -376,16 +377,128 @@ check(
   JSON.stringify(p9.steps.map((s) => s.result))
 );
 
-out.push('[solve 的快取以容器識別碼為鍵]');
-// 就地塞新配方進去**不會**被看到——這是刻意的契約，換資料請重建一個新的 Map
-// （儀表板本來就是每次重建）。這條測試把契約釘住，免得哪天有人改成就地修改。
-by4.set('壬', [
-  { key: 'combine:水|雷', action: 'combine', inputs: ['水', '雷'], result: '壬', emoji: null, needsPray: false, discoveredBy: null },
-]);
-check('就地改同一個 Map 不會被看到', plan('壬', ownedC, by4, 'steps').ok === false, '');
-put4(['水', '雷'], '壬');
+out.push('[環：一律當作那條配方不存在]');
+// 癸 有兩條配方：一條繞回自己（透過子），一條老老實實用得到的材料。
+// 推薦出來的那條**絕對不能**是繞回自己的那條。
+const KB6 = new Map();
+const put6 = (inputs, result) => {
+  const e = fromAttempt(attempt({ inputs, result }));
+  const next = e.merge(KB6.get(e.key));
+  if (next) KB6.set(e.key, next);
+};
+put6(['水', '火'], '甲');
+put6(['土', '風'], '乙');
+put6(['甲', '癸'], '子'); // 子 要用到癸
+put6(['子', '雷'], '癸'); // 癸 又要用到子 → 這一對互相循環
+put6(['甲', '乙'], '癸'); // 癸 的另一條：正常做得出來
+const by6 = recipesByResult([...KB6.values()]);
+const ownedP = new Set(['水', '火', '土', '風', '雷']);
+const p10 = plan('癸', ownedP, by6, 'steps');
+check('癸 規劃成功', p10.ok === true, JSON.stringify(p10));
+check('選的是不繞回自己的那條（甲＋乙）', p10.steps.some((s) => s.result === '癸' && s.inputs.sort().join('+') === '乙+甲'), JSON.stringify(p10.steps));
+check('路徑裡不會出現子（那是環的另一半）', !p10.steps.some((s) => s.result === '子'), JSON.stringify(p10.steps.map((s) => s.result)));
+
+// 使用者提的那個情境：
+//   目標 X ← D＋F、F ← A＋X（F 要用到 X）、D ← C＋B、C ← A＋B
+// 「把最後接成環的那一步拔掉」＝ 當作 A＋X＝F 不存在，F 降級成自己想辦法弄到的材料。
+// 期望的路徑：A＋B＝C、C＋B＝D、D＋F＝X，F 標成缺料。
+const KB8 = new Map();
+const put8 = (inputs, result) => {
+  const e = fromAttempt(attempt({ inputs, result }));
+  const next = e.merge(KB8.get(e.key));
+  if (next) KB8.set(e.key, next);
+};
+put8(['水', '火'], 'C'); // A＝水、B＝火
+put8(['C', '火'], 'D');
+put8(['水', 'X'], 'F'); // ← 會繞回目標的那條
+put8(['D', 'F'], 'X');
+const by8 = recipesByResult([...KB8.values()]);
+const p11 = plan('X', ownedP, by8, 'steps');
+check('拆掉會繞回目標的那條之後，路徑還是給得出來', p11.ok === false && p11.steps.length === 3, JSON.stringify(p11));
+check(
+  '給的就是 C、D、X 三步',
+  p11.steps.map((s) => s.result).join(',') === 'C,D,X',
+  JSON.stringify(p11.steps.map((s) => s.result))
+);
+check('F 變成要自己想辦法弄到的材料', p11.missing.join(',') === 'F', JSON.stringify(p11.missing));
+check('每一步都排得出順序（沒有卡住的）', !p11.steps.some((s) => s.unresolved), JSON.stringify(p11.steps.map((s) => [s.result, !!s.unresolved])));
+
+// 樹也要停在 F，不能照著 F ← 水＋X 又畫回目標
+const { best: best8 } = computeDepths(by8);
+const chosen8 = new Map(best8);
+for (const s of p11.steps) {
+  const r = (by8.get(s.result) || []).find((x) => x.key === s.key);
+  if (r) chosen8.set(s.result, r);
+}
+const t8 = buildTree('X', by8, chosen8, { stopAt: ownedP, missing: new Set(p11.missing) });
+const flat8 = [];
+(function walk(n) { flat8.push(n); n.children.forEach(walk); })(t8);
+check('樹上沒有任何一個節點被標成循環', !flat8.some((n) => n.cycle), JSON.stringify(flat8.filter((n) => n.cycle).map((n) => n.word)));
+check('F 在樹上是缺料的葉子', flat8.some((n) => n.word === 'F' && n.kind === 'unknown' && !n.children.length), JSON.stringify(flat8.map((n) => [n.word, n.kind])));
+check('樹上不會再出現目標自己', flat8.filter((n) => n.word === 'X').length === 1, JSON.stringify(flat8.map((n) => n.word)));
+
+// 兩個造物只能互相做出對方 → 拆掉一邊，另一邊還是給得出路徑
+const KB9 = new Map();
+const put9 = (inputs, result) => {
+  const e = fromAttempt(attempt({ inputs, result }));
+  const next = e.merge(KB9.get(e.key));
+  if (next) KB9.set(e.key, next);
+};
+put9(['午', '水'], '巳');
+put9(['巳', '火'], '午');
+const by9 = recipesByResult([...KB9.values()]);
+const p12 = plan('巳', ownedP, by9, 'steps');
+check('互相依賴時，拆掉另一邊就給得出路徑', p12.steps.length === 1 && p12.steps[0].result === '巳', JSON.stringify(p12.steps));
+check('被拆掉的那個變成缺料', p12.missing.join(',') === '午', JSON.stringify(p12.missing));
+
+// buildTree 自己的最後一道防線：拿不到「該用哪條配方」時**不准**隨便抓一條。
+// 以前這裡會退而求其次抓 recipes 的第一條，那正是把環畫上樹的元凶。
+// 走完整流程時規劃器會先把這些標成缺料，所以這裡直接餵一個空的 best 來打它。
+const { best: best9 } = computeDepths(by9);
+check('深度算不出來的造物不會進 best', !best9.has('巳') && !best9.has('午'), JSON.stringify([...best9.keys()]));
+const t9 = buildTree('巳', by9, best9, { stopAt: ownedP });
+check('拿不到配方時標成 unreachable，不亂抓一條', t9.kind === 'unreachable', JSON.stringify({ kind: t9.kind, recipe: t9.recipe }));
+check('而且不會往下展開成一條環', t9.children.length === 0, JSON.stringify(t9.children.map((c) => c.word)));
+
+out.push('[最少未知不該比最短路徑還缺]');
+// 丑 有兩條做法：一條 2 步但缺 2 樣，一條 3 步只缺 1 樣。
+const KB7 = new Map();
+const put7 = (inputs, result) => {
+  const e = fromAttempt(attempt({ inputs, result }));
+  const next = e.merge(KB7.get(e.key));
+  if (next) KB7.set(e.key, next);
+};
+put7(['缺甲', '缺乙'], '寅'); // 兩樣都沒人煉得出來 → 缺 2
+put7(['水', '火'], '卯');
+put7(['卯', '缺丙'], '辰'); // 缺 1
+put7(['寅', '水'], '丑');
+put7(['辰', '火'], '丑');
+const by7 = recipesByResult([...KB7.values()]);
+const steps7 = plan('丑', ownedP, by7, 'steps');
+const miss7 = plan('丑', ownedP, by7, 'missing');
+check('兩種模式都算得出來', steps7.ok === false && miss7.ok === false, JSON.stringify([steps7.ok, miss7.ok]));
+check(
+  '最少未知缺的不會比最短路徑多',
+  miss7.missing.length <= steps7.missing.length,
+  `最短路徑缺 ${steps7.missing.length}（${steps7.missing}）／最少未知缺 ${miss7.missing.length}（${miss7.missing}）`
+);
+check('最少未知真的挑到只缺一樣的那條', miss7.missing.length === 1, JSON.stringify(miss7.missing));
+
+out.push('[同一份資料要給同一個答案；換資料要重建 Map]');
+// solve 的結果以容器識別碼快取。保證的是：同一組容器問幾次都一樣，
+// 換了資料重建一個新的 Map 就會反映出來。
+// （不保證的是「就地修改一定看不到」——局部搜尋找替代配方時讀的是當下的 Map。
+//   所以換資料請重建，儀表板本來就是每次重建。）
+const before4 = plan('辛', ownedC, by4, 'steps').stepCount;
+check('同一組容器問三次都一樣', [1, 2, 3].every(() => plan('辛', ownedC, by4, 'steps').stepCount === before4), String(before4));
+check('步驟內容也一樣', plan('辛', ownedC, by4, 'steps').steps.map((s) => s.result).join(',') === plan('辛', ownedC, by4, 'steps').steps.map((s) => s.result).join(','), '');
+put4(['水', '雷'], '己'); // 己 多一條一步就好的捷徑
 const by5 = recipesByResult([...KB4.values()]);
-check('重建一個新的 Map 就看得到', plan('壬', ownedC, by5, 'steps').ok === true, '');
+check(
+  '重建一個新的 Map 會反映新資料（多了捷徑，步數變少）',
+  plan('辛', ownedC, by5, 'steps').stepCount < before4,
+  `${plan('辛', ownedC, by5, 'steps').stepCount} vs ${before4}`
+);
 
 out.unshift(fail === 0 ? `RESULT: ALL PASS (${pass})` : `RESULT: ${fail} FAILED / ${pass} passed`);
 document.getElementById('out').textContent = out.join('\n');

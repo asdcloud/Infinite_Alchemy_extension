@@ -186,11 +186,6 @@ select:focus {
 .panel.danger {
   border-color: #5c2a20;
 }
-.panel.warn {
-  border-color: #6b4a1e;
-  background: rgba(224, 177, 85, 0.07);
-  color: var(--muted);
-}
 .muted {
   color: var(--muted);
 }
@@ -531,6 +526,11 @@ body.single-account .col-account {
 .node.unknown {
   border-style: dashed;
   color: var(--faint);
+}
+.node.unreachable {
+  border-style: dashed;
+  border-color: #7a3226;
+  color: #ffb0a3;
 }
 .node .depth {
   font-size: 11px;

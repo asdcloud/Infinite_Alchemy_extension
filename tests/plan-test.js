@@ -155,21 +155,30 @@ if (alt.length) {
   );
 }
 
-out.push('[循環的路徑不能印成「照這個順序做」]');
-// 遊戲王 ← 卡片＋決鬥，決鬥 ← 對戰＋遊戲王：互為前提，照著做不出來
+out.push('[會繞回目標的那條配方要當作不存在]');
+// 遊戲王 ← 卡片＋決鬥，而 決鬥 ← 對戰＋遊戲王：決鬥那條會繞回目標。
+// 規則是把它拔掉 → 決鬥降級成「自己想辦法弄到的材料」，路徑照樣給得出來。
 await setAccount('A1');
 await plan('遊戲王');
 const head = () => document.querySelector('#plan-result .verdict-box');
 const headText = () => (head().textContent || '').replace(/\s+/g, ' ');
 compare('遊戲王');
-check('標題不能寫成「N 步就能煉出」', !/步就能煉出/.test(headText()), headText());
-check('要直說這條路走不通', /走不通/.test(headText()), headText());
-check('要指出是哪個造物在循環', headText().includes('循環'), headText());
-check('標題用警告色', head().classList.contains('bad'), head().className);
-check('步驟不再標 1. 2. 3.（那是可以照做的順序才用的）',
-  [...document.querySelectorAll('#plan-result .steps .no')].every((n) => n.textContent.trim() === '・'),
+check('不會再說「走不通」', !/走不通/.test(headText()), headText());
+check('照樣給得出步驟', readSteps().length > 0, JSON.stringify(readSteps()));
+check('步驟有編號（代表排得出順序）',
+  [...document.querySelectorAll('#plan-result .steps .no')].every((n) => /^\d+\.$/.test(n.textContent.trim())),
   [...document.querySelectorAll('#plan-result .steps .no')].map((n) => n.textContent).join(''));
-check('樹上有標「循環，已截斷」', /循環/.test(document.getElementById('tree-out').textContent), '');
+check('決鬥 被當成要自己弄到的材料', /缺少：.*決鬥/.test(headText()), headText());
+check('樹上完全沒有「循環」字樣', !/循環/.test(document.getElementById('tree-out').textContent), document.getElementById('tree-out').textContent.slice(0, 120));
+check('樹上不會出現第二個遊戲王',
+  [...document.querySelectorAll('#tree-out .node')].filter((n) => NAME(n.querySelector('span').textContent) === '遊戲王').length === 1,
+  [...document.querySelectorAll('#tree-out .node')].map((n) => NAME(n.querySelector('span').textContent)).join('、'));
+check('決鬥 在樹上是停下來的葉子',
+  [...document.querySelectorAll('#tree-out li')].some((li) => {
+    const label = li.querySelector(':scope > .node');
+    return label && NAME(label.childNodes[0].textContent) === '決鬥' && li.querySelectorAll(':scope > ul > li').length === 0;
+  }),
+  document.getElementById('tree-out').textContent.slice(0, 160));
 
 out.push('[存進待煉]');
 await setAccount('A1');
@@ -185,8 +194,8 @@ check('步數跟畫面上的一致', saveMsg.steps.length === readSteps().length
 check('每一步都帶著配方 key', saveMsg.steps.every((s) => !!s.key), JSON.stringify(saveMsg.steps.map((s) => s.key)));
 check('存完會回報結果', /已存進待煉/.test(document.getElementById('plan-result').textContent), '');
 
-await plan('遊戲王'); // 走不通的那條
-check('走不通的路徑不給存', !saveBtn(), '按鈕還在');
+await plan('遊戲王'); // 拆環之後這條也是可以照做的（決鬥要自己弄到）
+check('缺材料但排得出順序的路徑照樣能存', !!saveBtn(), '按鈕不見了');
 
 out.push('[重新整理要真的重畫「怎麼煉」]');
 await setAccount('A1');

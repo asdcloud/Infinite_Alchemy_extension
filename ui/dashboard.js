@@ -532,6 +532,7 @@ function treeNodeEl(node) {
     owned ? el('span', { class: 'depth', text: '✔ 已持有' }) : null,
     node.kind === 'primordial' ? el('span', { class: 'depth', text: '原質' }) : null,
     node.kind === 'unknown' ? el('span', { class: 'depth', text: '缺料・要去市集買' }) : null,
+    node.kind === 'unreachable' ? el('span', { class: 'depth', text: '每條做法都繞回它自己・煉不出來' }) : null,
     node.cycle ? el('span', { class: 'depth', text: '（循環，已截斷）' }) : null,
     node.recipe && node.recipe.action === 'refine' ? el('span', { class: 'tag refine', text: '萃取' }) : null,
     node.recipe && node.recipe.needsPray ? el('span', { class: 'tag pray', text: '需祈禱' }) : null,
@@ -580,7 +581,8 @@ function stepsFromTree(tree) {
       missing.add(n.word);
       return;
     }
-    if (n.cycle) {
+    // 每一條做法都繞回自己 → 當作煉不出來，跟「畫到一半發現繞回去」歸同一類處理
+    if (n.kind === 'unreachable' || n.cycle) {
       cycles.add(n.word);
       return;
     }
@@ -674,7 +676,12 @@ function renderPlan(target) {
     if (alt) bestFor.set(w, alt);
   }
 
-  const tree = buildTree(target, state.recipes, bestFor, { stopAt: state.owned });
+  // 規劃器判定要當成缺料的（含被拆環拆掉的那幾個）在樹上也要停下來，
+  // 不然樹會照著那條會繞回目標的配方往下畫，又變成一條環
+  const tree = buildTree(target, state.recipes, bestFor, {
+    stopAt: state.owned,
+    missing: new Set(result.missing || []),
+  });
   const { steps, missing, usedOwned, cycles } = stepsFromTree(tree);
   const picked = state.treePick.size > 0;
   const needsPray = steps.some((s) => s.needsPray);
@@ -705,7 +712,7 @@ function renderPlan(target) {
   if (cycles.length) {
     head.appendChild(
       el('div', {
-        text: `${cycles.map(wordLabel).join('、')} 要先有自己才煉得出自己（互相循環）——樹上標「循環，已截斷」的就是這裡。`,
+        text: `${cycles.map(wordLabel).join('、')} 每一條做法最後都繞回它自己，照著做不出來——樹上標出來的就是這幾個。`,
       })
     );
   }

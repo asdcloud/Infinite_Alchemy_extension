@@ -60,13 +60,17 @@ export function classify(word, recipes) {
  * 展開某個造物的族譜樹（帶循環保護）。
  * opts.stopAt 是「已經有了、不必再往下追」的造物集合——傳入持有物就會停在你手上的東西，
  * 這樣樹畫出來的就跟規劃器算出來的路徑一致。
+ * opts.missing 是規劃器判定「要自己想辦法弄到」的造物——包含沒人煉得出來的，
+ * 也包含被拆環拆掉的（有配方，但那條會繞回目標）。兩者在這條路上都是葉節點。
  */
 export function buildTree(word, recipes, best, opts = {}, seen = new Set()) {
+  const leaf = (kind) => ({ word, kind, children: [], recipe: null, alternatives: 0, cycle: false });
   const stopAt = opts.stopAt;
   if (stopAt && stopAt.has(word) && seen.size > 0) {
     // 根節點不停（不然查自己已有的東西會什麼都看不到）
-    return { word, kind: 'owned', children: [], recipe: null, alternatives: 0, cycle: false };
+    return leaf('owned');
   }
+  if (opts.missing && opts.missing.has(word) && seen.size > 0) return leaf('unknown');
   const kind = classify(word, recipes);
   const node = { word, kind, children: [], recipe: null, alternatives: 0, cycle: false };
   if (kind !== 'crafted') return node;
@@ -74,8 +78,16 @@ export function buildTree(word, recipes, best, opts = {}, seen = new Set()) {
     node.cycle = true;
     return node;
   }
-  const r = best.get(word) || (recipes.get(word) || [])[0];
-  if (!r) return node;
+  // best 只收得到「深度算得出來」的造物；算不出深度就代表它的每一條配方
+  // 最後都會繞回自己，等於煉不出來。
+  //
+  // 這裡以前會退而求其次拿 recipes 的第一條，結果就是直接畫出一條繞回自己的環——
+  // 那種路徑照著做不出來，不如當它不存在。
+  const r = best.get(word);
+  if (!r) {
+    node.kind = 'unreachable';
+    return node;
+  }
   node.recipe = r;
   node.alternatives = Math.max(0, (recipes.get(word) || []).length - 1);
   const nextSeen = new Set(seen);
