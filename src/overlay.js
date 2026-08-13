@@ -216,9 +216,11 @@ export function mountOverlay(ctx) {
     ctx.runSync({});
   });
 
+  // 版本檢查的結果走另一條：content.js 從背景的回覆裡撈出來再轉發過來
+  window.addEventListener('ia-update-info', (e) => showUpdate(e.detail));
+
   window.addEventListener('ia-sync-progress', (e) => {
     const p = e.detail || {};
-    if (p.update) showUpdate(p.update);
     els.prog.classList.remove('hide');
     const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
     els.bar.style.width = `${pct}%`;

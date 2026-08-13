@@ -34,6 +34,11 @@ window.chrome = {
     sendMessage(m, cb) {
       if (m.type === 'ia-cmd' && m.cmd === 'feed-claim') { if (cb) cb({ ok: true, granted }); return; }
       if (m.type === 'ia-sync-data' && m.kind === 'global-feed') { sent.push(m.rows); if (cb) cb({ ok: true, learned: m.rows.length }); return; }
+      // 背景在「完成／失敗」那一則會把版本檢查結果放進回覆
+      if (m.type === 'ia-sync-progress' && (m.phase === 'done' || m.phase === 'error')) {
+        if (cb) cb({ ok: true, update: { hasUpdate: true, latest: '9.9.9', current: '1.0.0' } });
+        return;
+      }
       if (cb) cb({ ok: true });
     },
     getURL: (p) => p,
@@ -88,6 +93,17 @@ storageListener({ globalFeed: { newValue: false } }, 'local');
 const before = feedCalls();
 await wait(200);
 check('關掉之後不再發請求', feedCalls() === before, `${feedCalls()} vs ${before}`);
+
+out.push('[版本檢查要真的傳得到浮層]');
+// 背景把結果放在「進度回報」的回覆裡（runtime 廣播送不到 content script），
+// content.js 得把它撈出來轉成 ia-update-info 事件，浮層才收得到。
+// 這一段斷過一次：浮層去讀進度事件本身的 update，那裡永遠是空的。
+const seenUpdates = [];
+window.addEventListener('ia-update-info', (e) => seenUpdates.push(e.detail));
+window.__cs({ type: 'ia-sync-run', opts: {} }, {}, () => {});
+await wait(600);
+check('跑完更新後有把版本檢查結果轉發給浮層', seenUpdates.length >= 1, JSON.stringify(seenUpdates));
+check('轉發的就是背景回的那份', seenUpdates[0] && seenUpdates[0].latest === '9.9.9', JSON.stringify(seenUpdates[0]));
 
 out.push('[沒拿到租約]');
 granted = false;

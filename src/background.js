@@ -774,8 +774,9 @@ async function handleSyncProgress(msg) {
       update = await checkUpdate();
     }
   }
+  // 廣播給儀表板／popup；content script 收不到 runtime 廣播，所以也回覆一份給它
   broadcast({ ...msg, type: 'ia-progress', update });
-  return { ok: true };
+  return { ok: true, update };
 }
 
 async function handleSyncData(msg) {

@@ -314,13 +314,15 @@ window.fetch = (url, init) => {
 
 // 更新跑完會順手查一次（這時還沒查過，所以真的會打出去）
 broadcasts.length = 0;
-await send(
+res = await send(
   { type: 'ia-sync-progress', phase: 'done', done: 6, total: 6, stats: { discoveries: 1 } },
   gameSender
 );
 const doneMsg = broadcasts.filter((m) => m && m.type === 'ia-progress' && m.phase === 'done').pop();
 check('按更新跑完會順手查一次', ghCalls === 1, String(ghCalls));
-check('更新完成的廣播帶著版本檢查結果', !!(doneMsg && doneMsg.update), JSON.stringify(doneMsg));
+check('更新完成的廣播帶著版本檢查結果（儀表板走這條）', !!(doneMsg && doneMsg.update), JSON.stringify(doneMsg));
+// runtime 廣播送不到 content script，浮層只能靠這條回覆拿到
+check('回覆裡也要帶著版本檢查結果（浮層走這條）', !!(res.r && res.r.update), JSON.stringify(res.r));
 check('而且說得出有新版本', doneMsg && doneMsg.update.hasUpdate === true, JSON.stringify(doneMsg && doneMsg.update));
 check('版本號是去掉 v 的', doneMsg && doneMsg.update.latest === '9.9.9', JSON.stringify(doneMsg && doneMsg.update));
 

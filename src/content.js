@@ -138,8 +138,12 @@ async function diagnose() {
 }
 
 function progress(p) {
-  send({ type: 'ia-sync-progress', ...p });
   window.dispatchEvent(new CustomEvent('ia-sync-progress', { detail: p }));
+  // 背景在「完成」那一則會順手回報版本檢查結果。浮層拿不到背景的廣播
+  // （chrome.runtime.sendMessage 送不到 content script），只能靠這條回覆帶回來。
+  sendAsync({ type: 'ia-sync-progress', ...p }).then((r) => {
+    if (r && r.update) window.dispatchEvent(new CustomEvent('ia-update-info', { detail: r.update }));
+  });
 }
 
 async function api(path) {

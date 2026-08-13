@@ -271,15 +271,19 @@ check('平常藏著', $('.upd').classList.contains('hide'));
 check('掛載時只讀存下來的，不會叫背景去打 GitHub',
   cmds.some((m) => m.cmd === 'check-update' && m.opts && m.opts.cachedOnly === true), JSON.stringify(cmds.filter((m) => m.cmd === 'check-update')));
 
-window.dispatchEvent(new CustomEvent('ia-sync-progress', {
-  detail: { phase: 'done', done: 6, total: 6, stats: {}, update: { hasUpdate: false, latest: '1.1.3', current: '1.1.3' } },
-}));
-await wait(20);
-check('版本一樣就不要冒出來', $('.upd').classList.contains('hide'));
-
+// 進度事件本身不帶版本資訊（背景的廣播送不到 content script），
+// 曾經誤以為它帶得到，浮層那顆按鈕就永遠不會冒出來
 window.dispatchEvent(new CustomEvent('ia-sync-progress', {
   detail: { phase: 'done', done: 6, total: 6, stats: {}, update: { hasUpdate: true, latest: '9.9.9', current: '1.1.3' } },
 }));
+await wait(20);
+check('不能靠進度事件帶版本資訊', $('.upd').classList.contains('hide'), $('.updbtn').textContent);
+
+window.dispatchEvent(new CustomEvent('ia-update-info', { detail: { hasUpdate: false, latest: '1.1.3', current: '1.1.3' } }));
+await wait(20);
+check('版本一樣就不要冒出來', $('.upd').classList.contains('hide'));
+
+window.dispatchEvent(new CustomEvent('ia-update-info', { detail: { hasUpdate: true, latest: '9.9.9', current: '1.1.3' } }));
 await wait(20);
 check('有新版本就浮出來', !$('.upd').classList.contains('hide'));
 check('寫著新舊版本號', $('.updbtn').textContent === '⬆ 有新版本 v9.9.9（目前 v1.1.3）', $('.updbtn').textContent);
