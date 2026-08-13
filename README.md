@@ -1,3 +1,0 @@
-# Infinite_Alchemy_extension
-
-一個幫助你紀錄網頁遊戲無限煉製的合成路徑以及匯入他人的合成路徑助手
