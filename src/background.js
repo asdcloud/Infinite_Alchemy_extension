@@ -5,13 +5,13 @@ import {
   getMeta,
   setMeta,
   upsertKnowledgeBatch,
-  allKnowledge,
   clearKnowledge,
   countKnowledge,
   getInventory,
   putInventory,
   getAccountState,
   putAccountState,
+  getKnowledge,
   wipeAll,
 } from './db.js';
 import {
@@ -25,9 +25,7 @@ import {
   predict,
   SOURCE,
 } from './knowledge.js';
-import { knownCombosFromOwned } from './planner.js';
 import { PRIMORDIALS } from './analysis.js';
-import { getKnowledge } from './db.js';
 
 const GAME_ORIGIN = 'https://pillars-of-creation.funtuan.work';
 
@@ -623,8 +621,6 @@ async function handleCommand(msg) {
       return importPayload(msg.payload, msg.label);
     case 'predict':
       return doPredict(msg.action, msg.inputs);
-    case 'suggest':
-      return doSuggest(msg.accountId, msg.limit);
     case 'feed-claim':
       // 只有拿到租約的分頁才輪詢；tabId 由訊息處理器從 sender 補上
       return { ok: true, granted: msg.tabId != null && claimFeedLease(msg.tabId) };
@@ -638,32 +634,13 @@ async function handleCommand(msg) {
   }
 }
 
-// ── 查詢（浮層與儀表板共用）────────────────────────────
-async function currentAccountId(accountId) {
-  if (accountId !== undefined && accountId !== null) return accountId;
-  const account = (await getMeta('account', null)) || {};
-  return account.id ?? null;
-}
-
-async function ownedSet(accountId) {
-  const inv = await getInventory(String(await currentAccountId(accountId) ?? 'unknown'));
-  const words = inv && inv.items ? Object.keys(inv.items) : [];
-  // 五原質一定有
-  for (const w of PRIMORDIALS) if (!words.includes(w)) words.push(w);
-  return new Set(words);
-}
-
+// ── 查詢（浮層用；儀表板是擴充套件頁面，直接讀資料庫不繞這裡）──
 async function doPredict(action, inputs) {
   const act = action === 'refine' ? 'refine' : 'combine';
   const norm = normalizeInputs(act, inputs);
   if (!norm.length) return { ok: false, error: '請提供材料' };
   const rec = await getKnowledge(recipeKey(act, norm));
   return { ok: true, inputs: norm, action: act, prediction: predict(rec) };
-}
-
-async function doSuggest(accountId, limit) {
-  const [knowledge, owned] = await Promise.all([allKnowledge(), ownedSet(accountId)]);
-  return { ok: true, items: knownCombosFromOwned(owned, knowledge, limit || 60), ownedCount: owned.size };
 }
 
 async function findGameTab() {

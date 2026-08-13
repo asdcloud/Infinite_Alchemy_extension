@@ -59,12 +59,25 @@ const CSS = `
   border-radius: 7px; padding: 4px 8px; color: #f2e6cf; font-size: 12.5px;
 }
 .manual input:focus { border-color: #e0b155; }
-.list { margin: 8px 0 0; padding: 0; list-style: none; max-height: 168px; overflow-y: auto; }
-.list li { padding: 3px 0; border-top: 1px solid rgba(74,57,37,.4); font-size: 12.5px; }
-.list li:first-child { border-top: none; }
-.list .to { color: #f7d183; }
-.tag { font-size: 10.5px; border: 1px solid #5b46a0; color: #c9b4ff; border-radius: 999px; padding: 0 5px; margin-left: 4px; }
-.h2 { color: #b39c76; font-size: 11.5px; margin: 9px 0 0; letter-spacing: .5px; }
+.feed {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid rgba(74,57,37,.55);
+}
+.feed .lbl { flex: 1; color: #b39c76; font-size: 11.5px; cursor: pointer; }
+.feed .st { color: #806b4c; font-size: 11px; }
+.sw { position: relative; display: inline-block; flex: none; width: 30px; height: 16px; cursor: pointer; }
+.sw input { all: unset; position: absolute; width: 0; height: 0; opacity: 0; }
+.sw i {
+  position: absolute; inset: 0; border-radius: 999px;
+  background: #1c1610; border: 1px solid #4a3925; transition: background .15s, border-color .15s;
+}
+.sw i::after {
+  content: ''; position: absolute; left: 2px; top: 2px; width: 10px; height: 10px;
+  border-radius: 50%; background: #806b4c; transition: transform .15s, background .15s;
+}
+.sw input:checked + i { background: rgba(224,177,85,.25); border-color: #e0b155; }
+.sw input:checked + i::after { transform: translateX(14px); background: #f7d183; }
+.sw input:focus-visible + i { border-color: #f7d183; }
 .prog { margin-top: 8px; font-size: 11.5px; color: #b39c76; }
 .bar { height: 3px; background: #1c1610; border-radius: 2px; overflow: hidden; margin-top: 3px; }
 .bar i { display: block; height: 100%; background: linear-gradient(90deg,#ff7f38,#e0b155); width: 0; }
@@ -95,8 +108,11 @@ export function mountOverlay(ctx) {
       </div>
       <div class="verdict dim">選兩個材料，這裡會顯示已知結果</div>
       <div class="prog hide"><span class="ptext"></span><span class="bar"><i></i></span></div>
-      <p class="h2">現在手上就能煉（已知配方）</p>
-      <ul class="list"></ul>
+      <div class="feed">
+        <span class="lbl" title="開啟後每 30 秒讀一次全服最新的合成紀錄，把別人的配方也收進共用配方表。只進配方表，不會進你的軌跡。">全服動態收集</span>
+        <span class="st">關閉</span>
+        <label class="sw"><input type="checkbox" class="fd" /><i></i></label>
+      </div>
     </div>`;
   root.appendChild(wrap);
   (document.body || document.documentElement).appendChild(host);
@@ -109,11 +125,13 @@ export function mountOverlay(ctx) {
     ma: $('.ma'),
     mb: $('.mb'),
     verdict: $('.verdict'),
-    list: $('.list'),
     prog: $('.prog'),
     ptext: $('.ptext'),
     bar: $('.bar i'),
     fold: $('.fold'),
+    feedBox: $('.fd'),
+    feedState: $('.feed .st'),
+    feedLabel: $('.feed .lbl'),
   };
 
   let lastKey = '';
@@ -159,7 +177,6 @@ export function mountOverlay(ctx) {
       els.ptext.textContent = `更新完成：素材櫃 ${s.discoveries ?? 0} 種、軌跡 +${
         (s.logAdded ?? 0) + (s.myRecipesAdded ?? 0)
       }、配方表 +${s.learned ?? 0}`;
-      refreshSuggestions();
       setTimeout(() => els.prog.classList.add('hide'), 6000);
     } else if (p.phase === 'error') {
       els.ptext.textContent = `同步失敗：${p.error || '未知錯誤'}`;
@@ -312,33 +329,33 @@ export function mountOverlay(ctx) {
     }
   }, 4000);
 
-  // ── 現在就能煉 ──
-  async function refreshSuggestions() {
-    const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'suggest', limit: 30 });
-    els.list.textContent = '';
-    if (!r || !r.ok || !r.items.length) {
-      const li = document.createElement('li');
-      li.className = 'sub';
-      li.textContent = r && r.ok ? '共用配方表裡沒有你手上材料能直接做的新東西。按 ⟳ 更新，或匯入別人分享的配方。' : '尚無資料';
-      els.list.appendChild(li);
-      return;
-    }
-    for (const it of r.items.slice(0, 30)) {
-      const li = document.createElement('li');
-      li.textContent = `${it.inputs.join(' ＋ ')} → `;
-      const to = document.createElement('span');
-      to.className = 'to';
-      to.textContent = `${it.emoji ? it.emoji + ' ' : ''}${it.result}`;
-      li.appendChild(to);
-      if (it.needsPray) {
-        const tag = document.createElement('span');
-        tag.className = 'tag';
-        tag.textContent = '需祈禱';
-        li.appendChild(tag);
-      }
-      els.list.appendChild(li);
-    }
+  // ── 全服動態收集開關 ──
+  //
+  // 狀態存在 chrome.storage.local.globalFeed，content.js 的輪詢器與儀表板都聽同一把鑰匙，
+  // 所以這裡撥一下，另外兩邊會立刻跟上，不會各說各話。
+  function paintFeed(on) {
+    els.feedBox.checked = on;
+    els.feedState.textContent = on ? '開啟中' : '關閉';
   }
-  refreshSuggestions();
-  setInterval(refreshSuggestions, 60000);
+  els.feedBox.addEventListener('change', () => {
+    const on = els.feedBox.checked;
+    paintFeed(on);
+    try {
+      chrome.storage.local.set({ globalFeed: on });
+    } catch (_) {
+      els.feedState.textContent = '無法儲存';
+    }
+  });
+  els.feedLabel.addEventListener('click', () => {
+    els.feedBox.checked = !els.feedBox.checked;
+    els.feedBox.dispatchEvent(new Event('change'));
+  });
+  try {
+    chrome.storage.local.get(['globalFeed'], (v) => paintFeed(!!(v && v.globalFeed)));
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.globalFeed) paintFeed(!!changes.globalFeed.newValue);
+    });
+  } catch (_) {
+    /* 沒有 storage 權限就維持顯示「關閉」 */
+  }
 }
