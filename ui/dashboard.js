@@ -646,18 +646,35 @@ function renderPlan(target) {
     );
     return;
   }
+  // 走到這裡代表「不是你已經有的」（上面那段先擋掉了，五原質一定在持有物裡），
+  // 所以只剩一種情況：共用配方表裡還沒有這個造物的配方。
   if (kind !== 'crafted') {
     treeBox.classList.add('hidden');
+    const msg = el('span', { class: 'muted' });
     box.appendChild(
       el('div', { class: 'verdict-box dim' }, [
         el('div', { class: 'big', text: `煉不出「${target}」` }),
-        el('div', {
-          text:
-            kind === 'primordial'
-              ? '這是五原質之一，本來就有。'
-              : '共用配方表裡還沒有這個造物的配方。',
-        }),
+        el('div', { text: '共用配方表裡還沒有這個造物的配方。' }),
         el('div', { class: 'sub muted', text: '按「⟳ 更新」把配方收進來，或匯入別人分享的檔案。' }),
+        // 沒配方不代表你不想要它——記進待煉，哪天有人發現了那一列就會自己亮起來
+        el('p', { class: 'row' }, [
+          el('button', {
+            class: 'ghost',
+            text: '📌 記進待煉（想要，但還沒配方）',
+            title: '存到遊戲內浮層的「待煉」，哪天配方進到表裡就會提醒你',
+            onclick: async (e) => {
+              const btn = e.currentTarget;
+              btn.disabled = true;
+              const r = await cmd({ type: 'ia-cmd', cmd: 'goal-wish', target });
+              btn.disabled = false;
+              msg.textContent =
+                r && r.ok
+                  ? '已記進待煉——哪天配方進到表裡，浮層那一列就會變成「已經有配方了」。'
+                  : `存不進去：${(r && r.error) || '背景服務沒有回應'}`;
+            },
+          }),
+          msg,
+        ]),
       ])
     );
     return;

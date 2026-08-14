@@ -154,6 +154,17 @@ export async function clearKnowledge() {
   return wrap((await store(KNOWLEDGE, 'readwrite')).clear());
 }
 
+/**
+ * 這個造物現在有沒有人知道怎麼煉？
+ * 走 result 索引，不必把整份配方表撈出來（表大起來差很多）。
+ * 崩解的紀錄 result 是 null，不會被算進去。
+ */
+export async function hasRecipeFor(result) {
+  if (!result) return false;
+  const n = await wrap((await store(KNOWLEDGE)).index('result').count(result));
+  return n > 0;
+}
+
 // ── inventory（分帳號持有物快照）───────────────────────
 export async function getInventory(accountId) {
   return wrap((await store(INVENTORY)).get(String(accountId ?? 'unknown')));

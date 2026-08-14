@@ -12,6 +12,7 @@ import {
   getAccountState,
   putAccountState,
   getKnowledge,
+  hasRecipeFor,
   allGoals,
   getGoal,
   putGoal,
@@ -705,6 +706,8 @@ async function handleCommand(msg) {
       return listGoals();
     case 'goal-path':
       return saveGoalPath(msg.target, msg.steps);
+    case 'goal-wish':
+      return saveGoalWish(msg.target);
     case 'goal-step-done':
       return tickPathStep(msg.stepKey);
     case 'goal-remove':
@@ -763,9 +766,21 @@ async function listGoals() {
   const items = [];
   for (const g of goals) {
     if (g.kind === 'path') items.push(g);
+    // 願望：現在還沒人知道怎麼煉的造物。每次列出來都重問一次——
+    // 哪天有人發現了（或你匯入了別人的檔案），它就會自己變成「已經有配方了」。
+    else if (g.kind === 'wish') items.push({ ...g, known: await hasRecipeFor(g.target) });
     else items.push({ ...g, prediction: predict(await getKnowledge(g.key)) });
   }
   return { ok: true, items };
+}
+
+/** 記下「我想要這個造物，但現在還沒人知道怎麼煉」 */
+async function saveGoalWish(target) {
+  if (!target) return { ok: false, error: '請提供造物名稱' };
+  const key = `wish:${target}`;
+  const prev = await getGoal(key);
+  await putGoal({ key, kind: 'wish', target, addedAt: (prev && prev.addedAt) || Date.now() });
+  return { ok: true, key };
 }
 
 /**

@@ -62,7 +62,7 @@ const ctx = {
       const items = [...goals.values()]
         .sort((a, b) => b.addedAt - a.addedAt)
         .map((g) =>
-          g.kind === 'path'
+          g.kind === 'path' || g.kind === 'wish'
             ? g
             : {
                 ...g,
@@ -288,6 +288,27 @@ await wait(60);
 pathLi().querySelectorAll('.psteps .done')[0].click();
 await wait(60);
 check('整條做完就自動消失', $('.glist li.path') === null, $('.glist').textContent);
+
+out.push('[待煉：還沒配方的願望]');
+goals.set('wish:歐貝利斯克的巨神兵', {
+  key: 'wish:歐貝利斯克的巨神兵', kind: 'wish', target: '歐貝利斯克的巨神兵', addedAt: 97, known: false,
+});
+window.dispatchEvent(new CustomEvent('ia-goals-changed'));
+await wait(60);
+const wishLi = () => [...$('.glist').querySelectorAll('li')].find((li) => (li.querySelector('.gm') || {}).textContent === '歐貝利斯克的巨神兵');
+check('願望會列出來', !!wishLi(), $('.glist').textContent);
+check('還沒配方時寫「還沒人知道怎麼煉」', wishLi().querySelector('.say').textContent.includes('還沒人知道'), wishLi().querySelector('.say').textContent);
+check('不會畫成路徑那種一整塊', !wishLi().classList.contains('path'));
+
+// 哪天配方進到表裡，這一列要自己變
+goals.set('wish:歐貝利斯克的巨神兵', { ...goals.get('wish:歐貝利斯克的巨神兵'), known: true });
+window.dispatchEvent(new CustomEvent('ia-goals-changed'));
+await wait(60);
+check('有配方之後改口說已經有了', wishLi().querySelector('.say').textContent.includes('已經有配方了'), wishLi().querySelector('.say').textContent);
+check('而且換成綠色', wishLi().querySelector('.say').classList.contains('ok'), wishLi().querySelector('.say').className);
+wishLi().querySelector('.del').click();
+await wait(60);
+check('移得掉', !wishLi(), $('.glist').textContent);
 
 // 煉完某一步時，content.js 會轉這個事件過來，浮層要即時重畫
 goals.set('path:溫泉', {

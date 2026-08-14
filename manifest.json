@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "無限煉製 · 煉製軌跡 v1.3.4",
-  "version": "1.3.4",
-  "version_name": "v1.3.4",
+  "name": "無限煉製 · 煉製軌跡 v1.3.5",
+  "version": "1.3.5",
+  "version_name": "v1.3.5",
   "description": "跨帳號共用的配方表：成功、崩解、祈禱全記，合成前先告訴你結果，並依你手上的材料算出怎麼煉。資料只存在本機。",
   "minimum_chrome_version": "111",
   "permissions": ["storage", "unlimitedStorage"],

@@ -197,6 +197,23 @@ check('存完會回報結果', /已存進待煉/.test(document.getElementById('p
 await plan('遊戲王'); // 拆環之後這條也是可以照做的（決鬥要自己弄到）
 check('缺材料但排得出順序的路徑照樣能存', !!saveBtn(), '按鈕不見了');
 
+out.push('[還沒配方的造物：記進待煉]');
+await plan('歐貝利斯克的巨神兵'); // 配方表裡完全沒有這個造物
+const wishBtn = () => [...document.querySelectorAll('#plan-result button')].find((b) => b.textContent.includes('記進待煉'));
+check('說得出是沒有配方', /還沒有這個造物的配方/.test(document.getElementById('plan-result').textContent), '');
+check('有「記進待煉」可以按', !!wishBtn(), document.getElementById('plan-result').textContent.slice(0, 60));
+sent.length = 0;
+wishBtn().click();
+await wait(150);
+const wishMsg = sent.find((m) => m.cmd === 'goal-wish');
+check('送出的是這個造物的名字', !!wishMsg && wishMsg.target === '歐貝利斯克的巨神兵', JSON.stringify(wishMsg));
+check('存完會回報結果', /已記進待煉/.test(document.getElementById('plan-result').textContent), '');
+
+// 五原質一定在持有物裡，所以走的是更前面那條「你已經有了」，不會叫人記進待煉
+await plan('水');
+check('已經有的東西不給記進待煉', !wishBtn(), '按鈕還在');
+check('而且直說你已經有了', /你已經有/.test(document.getElementById('plan-result').textContent), document.getElementById('plan-result').textContent.slice(0, 40));
+
 out.push('[重新整理要真的重畫「怎麼煉」]');
 await setAccount('A1');
 await plan('地熱');

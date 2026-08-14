@@ -193,6 +193,7 @@ export async function upsertKnowledgeBatch(entries) {
   return entries.length;
 }
 export async function getKnowledge(key) { return KNOWLEDGE.find((k) => k.key === key) || undefined; }
+export async function hasRecipeFor(result) { return !!result && KNOWLEDGE.some((k) => k.result === result); }
 export async function putInventory() {}
 export async function putAccountState() {}
 

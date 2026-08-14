@@ -349,6 +349,28 @@ check('整條做完就自動消失', !(res.r.items || []).some((g) => g.kind ===
 res = await send({ type: 'ia-cmd', cmd: 'goal-step-done', stepKey: 'combine:不存在|的' }, dashSender);
 check('劃掉不存在的步驟不會出事', res.r && res.r.ok === true && res.r.changed === 0, JSON.stringify(res.r));
 
+out.push('[待煉：還沒配方的願望]');
+res = await send({ type: 'ia-cmd', cmd: 'goal-wish', target: '歐貝利斯克的巨神兵' }, dashSender);
+check('存得進去', res.r && res.r.ok === true && res.r.key === 'wish:歐貝利斯克的巨神兵', JSON.stringify(res.r));
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+let wish = (res.r.items || []).find((g) => g.kind === 'wish');
+check('清單裡認得出是願望', !!wish && wish.target === '歐貝利斯克的巨神兵', JSON.stringify(res.r.items.map((g) => g.kind)));
+check('現在還沒有配方', wish.known === false, String(wish.known));
+
+// 配方表裡已經有的造物 → 願望要顯示成「已經有配方了」
+res = await send({ type: 'ia-cmd', cmd: 'goal-wish', target: '間歇泉' }, dashSender);
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+wish = (res.r.items || []).find((g) => g.kind === 'wish' && g.target === '間歇泉');
+check('配方表裡有的就標成已經有配方', wish && wish.known === true, JSON.stringify(wish));
+
+res = await send({ type: 'ia-cmd', cmd: 'goal-wish', target: '歐貝利斯克的巨神兵' }, dashSender);
+res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
+check('同一個造物只留一筆', (res.r.items || []).filter((g) => g.kind === 'wish' && g.target === '歐貝利斯克的巨神兵').length === 1, '');
+res = await send({ type: 'ia-cmd', cmd: 'goal-wish' }, dashSender);
+check('沒給名稱就不收', res.r && res.r.ok === false, JSON.stringify(res.r));
+await send({ type: 'ia-cmd', cmd: 'goal-remove', key: 'wish:歐貝利斯克的巨神兵' }, dashSender);
+await send({ type: 'ia-cmd', cmd: 'goal-remove', key: 'wish:間歇泉' }, dashSender);
+
 out.push('[goal-remove]');
 await send({ type: 'ia-cmd', cmd: 'goal-path', target: '間歇泉', steps: PATH }, dashSender);
 res = await send({ type: 'ia-cmd', cmd: 'goal-remove', key: 'path:間歇泉' }, dashSender);

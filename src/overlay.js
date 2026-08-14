@@ -383,6 +383,32 @@ export function mountOverlay(ctx) {
     return li;
   }
 
+  /** 願望：想要但還沒人知道怎麼煉的造物。哪天配方進到表裡，這一列就會自己變 */
+  function wishLine(g) {
+    const li = document.createElement('li');
+    const what = document.createElement('div');
+    what.className = 'what';
+
+    const head = document.createElement('span');
+    head.className = 'gm';
+    head.textContent = g.target;
+    what.appendChild(head);
+
+    const say = document.createElement('span');
+    say.className = `say ${g.known ? 'ok' : ''}`.trim();
+    say.textContent = g.known ? '✅ 已經有配方了——去儀表板查「怎麼煉」' : '❓ 還沒人知道怎麼煉';
+    what.appendChild(say);
+    li.appendChild(what);
+
+    li.appendChild(
+      removeBtn('從待煉移除', async () => {
+        await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goal-remove', key: g.key });
+        refreshGoals();
+      })
+    );
+    return li;
+  }
+
   async function refreshGoals() {
     const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'goals' });
     const items = (r && r.ok && r.items) || [];
@@ -396,7 +422,9 @@ export function mountOverlay(ctx) {
       els.goalList.appendChild(li);
       return;
     }
-    for (const g of items) els.goalList.appendChild(g.kind === 'path' ? pathLine(g) : comboLine(g));
+    for (const g of items) {
+      els.goalList.appendChild(g.kind === 'path' ? pathLine(g) : g.kind === 'wish' ? wishLine(g) : comboLine(g));
+    }
   }
 
   function setGoalsOpen(open, persist = true) {
