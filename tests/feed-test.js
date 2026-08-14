@@ -112,6 +112,63 @@ await wait(200);
 check('租約被別的分頁佔著就不打 ranking', feedCalls() === before, `${feedCalls()} vs ${before}`);
 storageListener({ globalFeed: { newValue: false } }, 'local');
 
+out.push('[防呆：遊戲把合成紀錄拿掉時要自己收手]');
+// 2026-08 遊戲改版就把「全服最新的合成紀錄」這個排行榜整個拿掉了：
+// 端點還在、回 200，但內容裡沒有 combines。不防呆的話就會每 30 秒空打一次，永遠沒結果。
+const gaveUp = [];
+const realSend = window.chrome.runtime.sendMessage;
+window.chrome.runtime.sendMessage = (m, cb) => {
+  if (m.type === 'ia-cmd' && m.cmd === 'feed-give-up') {
+    gaveUp.push(m.reason);
+    if (cb) cb({ ok: true });
+    return;
+  }
+  return realSend(m, cb);
+};
+// 每次「關掉再打開」就等於再輪詢一次（打開的當下會立刻讀一次）
+const pollOnce = async () => {
+  storageListener({ globalFeed: { newValue: false } }, 'local');
+  storageListener({ globalFeed: { newValue: true } }, 'local');
+  await wait(120);
+};
+
+granted = true;
+window.fetch = async (url) => {
+  calls.push(String(url));
+  if (String(url).includes('/api/ranking/recent')) return new Response(JSON.stringify({ ok: 1 }), { status: 200 });
+  return new Response('{}', { status: 200 });
+};
+await pollOnce();
+check('第一次讀不到還不會放棄', gaveUp.length === 0, JSON.stringify(gaveUp));
+await pollOnce();
+check('第二次也還在忍', gaveUp.length === 0, JSON.stringify(gaveUp));
+await pollOnce();
+check('連續三次讀不到就自己收手', gaveUp.length === 1, JSON.stringify(gaveUp));
+check('而且說得出是為什麼', /沒有合成紀錄/.test(gaveUp[0] || ''), gaveUp[0]);
+
+// 空陣列不算失敗——可能只是這 30 秒剛好沒人煉
+gaveUp.length = 0;
+window.fetch = async (url) => {
+  calls.push(String(url));
+  if (String(url).includes('/api/ranking/recent')) return new Response(JSON.stringify({ combines: [] }), { status: 200 });
+  return new Response('{}', { status: 200 });
+};
+for (let i = 0; i < 4; i++) await pollOnce();
+check('拿到空陣列不算失敗，不會誤關', gaveUp.length === 0, JSON.stringify(gaveUp));
+
+// 整支讀不到（斷網、401）也要收手
+window.fetch = async (url) => {
+  calls.push(String(url));
+  if (String(url).includes('/api/ranking/recent')) return new Response('{"error":"尚未登入"}', { status: 401 });
+  return new Response('{}', { status: 200 });
+};
+for (let i = 0; i < 3; i++) await pollOnce();
+check('連續三次整支讀不到也會收手', gaveUp.length === 1, JSON.stringify(gaveUp));
+check('原因寫得出是讀不到', /讀不到/.test(gaveUp[0] || ''), gaveUp[0]);
+
+storageListener({ globalFeed: { newValue: false } }, 'local');
+window.chrome.runtime.sendMessage = realSend;
+
 out.unshift(fail === 0 ? `RESULT: ALL PASS (${pass})` : `RESULT: ${fail} FAILED / ${pass} passed`);
 o.textContent = out.join('\n');
 document.title = fail === 0 ? 'PASS' : 'FAIL';

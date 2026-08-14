@@ -1238,6 +1238,16 @@ async function renderFeed() {
           s.lastAt ? `・最後一次 ${fmtTime(s.lastAt).slice(5)}` : ''
         }`
       : '尚未收集過';
+
+  // 自動關掉的話要說清楚是為什麼，不然使用者只會發現開關自己變回關閉
+  const off = (r && r.ok && r.off) || null;
+  const box = $('feed-off');
+  box.classList.toggle('hidden', !off);
+  if (off) {
+    box.textContent =
+      `⚠ 已自動關閉（${fmtTime(off.at).slice(5)}）：${off.reason}。` +
+      '遊戲改版把這個排行榜拿掉時就會這樣——再打開也只會再關一次，等遊戲把它加回來為止。';
+  }
 }
 
 $('feed-toggle').addEventListener('change', (e) => {
@@ -1255,6 +1265,14 @@ try {
     const on = !!(v && v.globalFeed);
     $('feed-toggle').checked = on;
     $('feed-state').textContent = on ? '開啟中' : '關閉';
+  });
+  // 輪詢自己放棄時是背景把開關關掉的，這一頁要跟著變，並把原因顯示出來
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.globalFeed) return;
+    const on = !!changes.globalFeed.newValue;
+    $('feed-toggle').checked = on;
+    $('feed-state').textContent = on ? '開啟中' : '關閉';
+    renderFeed();
   });
 } catch (_) {
   /* 測試頁沒有 chrome API */

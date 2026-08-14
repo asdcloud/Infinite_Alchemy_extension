@@ -600,6 +600,32 @@ function claimFeedLease(tabId) {
   return true;
 }
 
+/**
+ * 輪詢連續讀不到東西 → 自動關掉，並把原因記下來。
+ *
+ * 遊戲會改版。2026-08 那次就把「全服最新的合成紀錄」這個排行榜整個拿掉了，
+ * 端點還在但回來的東西裡沒有合成紀錄——不防呆的話就會每 30 秒空打一次，永遠沒結果。
+ */
+async function giveUpFeed(reason) {
+  await setMeta('feedOff', { at: Date.now(), reason: reason || '連續讀不到資料' });
+  try {
+    // 關掉開關：content script 的輪詢器與兩邊的 UI 都聽這把鑰匙，會一起停下來
+    await chrome.storage.local.set({ globalFeed: false });
+  } catch (_) {
+    /* 沒有 storage 也不影響已經記下來的原因 */
+  }
+  return { ok: true, off: true, reason };
+}
+
+// 使用者自己再打開時，把上次自動關閉的理由清掉，不然畫面會一直掛著舊訊息
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.globalFeed && changes.globalFeed.newValue) setMeta('feedOff', null);
+  });
+} catch (_) {
+  /* 忽略 */
+}
+
 // 遊戲分頁被關掉時，同步一定跑不下去了；輪詢租約也要放掉
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (feedLease.tabId === tabId) {
@@ -687,7 +713,13 @@ async function handleCommand(msg) {
       // 只有拿到租約的分頁才輪詢；tabId 由訊息處理器從 sender 補上
       return { ok: true, granted: msg.tabId != null && claimFeedLease(msg.tabId) };
     case 'feed-stats':
-      return { ok: true, stats: (await getMeta('feedStats', null)) || { polls: 0, rows: 0, learned: 0, lastAt: 0 } };
+      return {
+        ok: true,
+        stats: (await getMeta('feedStats', null)) || { polls: 0, rows: 0, learned: 0, lastAt: 0 },
+        off: await getMeta('feedOff', null),
+      };
+    case 'feed-give-up':
+      return giveUpFeed(msg.reason);
     case 'open-dashboard':
       await chrome.tabs.create({ url: chrome.runtime.getURL('ui/dashboard.html') });
       return { ok: true };

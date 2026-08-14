@@ -189,6 +189,21 @@ select:focus {
 .muted {
   color: var(--muted);
 }
+/* 開關旁邊那句小字說明 */
+.hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+/* 出事了才會冒出來的那一條（例如輪詢被自動關掉） */
+.notice {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #7a5a22;
+  border-radius: 8px;
+  background: rgba(224, 177, 85, 0.09);
+  color: var(--gold-bright);
+  font-size: 13px;
+}
 .notes {
   padding-left: 20px;
   margin: 0;

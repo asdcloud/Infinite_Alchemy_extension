@@ -335,8 +335,19 @@ async function runSync(opts) {
 //   · 只送沒看過的列給背景，重複的直接丟掉
 //   · 分頁在背景時瀏覽器本來就會把計時器降頻，剛好順勢減少請求
 
+// 防呆：遊戲哪天把這支拿掉或改格式，就別再每 30 秒空打一次。
+// 連續 GIVE_UP_AFTER 次讀不到「合成紀錄」這個欄位（或整支讀不到）就自動關掉，
+// 並把原因記下來讓畫面說得出是怎麼回事。
+//
+// 只有「拿不到那個陣列」才算失敗；拿到空陣列不算——那可能只是這 30 秒剛好沒人煉。
 const FEED_INTERVAL_MS = 30000;
-const feed = { timer: null, seen: new Set(), on: false };
+const GIVE_UP_AFTER = 3;
+const feed = { timer: null, seen: new Set(), on: false, trouble: 0 };
+
+async function giveUpFeed(reason) {
+  feed.trouble = 0;
+  await sendAsync({ type: 'ia-cmd', cmd: 'feed-give-up', reason });
+}
 
 async function pollGlobalFeed() {
   // 先確認這個分頁是不是被指定的那一個
@@ -346,10 +357,19 @@ async function pollGlobalFeed() {
   let data;
   try {
     data = await api('/ranking/recent');
-  } catch (_) {
-    return; // 網路或權限問題就這輪跳過，下一輪再試
+  } catch (e) {
+    if (++feed.trouble >= GIVE_UP_AFTER) await giveUpFeed(`讀不到遊戲的合成紀錄（${(e && e.message) || '未知錯誤'}）`);
+    return;
   }
-  const rows = (data.combines || []).filter((e) => {
+  const list = data && Array.isArray(data.combines) ? data.combines : null;
+  if (!list) {
+    // 端點還在、但回來的東西裡沒有合成紀錄 → 多半是遊戲改版把它拿掉了
+    if (++feed.trouble >= GIVE_UP_AFTER) await giveUpFeed('遊戲的回應裡已經沒有合成紀錄這個欄位');
+    return;
+  }
+  feed.trouble = 0;
+
+  const rows = list.filter((e) => {
     if (!e || !e.a) return false;
     // 注意用 == null 而不是 !id：id 為 0 是合法的，用 !id 會把那一列吃掉
     const id = e.id ?? `${e.action}|${e.a}|${e.b ?? ''}|${e.createdAt ?? ''}`;
@@ -365,6 +385,8 @@ async function pollGlobalFeed() {
 function setGlobalFeed(on) {
   if (on === feed.on) return;
   feed.on = on;
+  // 這裡不重置 trouble：放棄的當下 giveUpFeed 已經歸零，所以重新打開本來就有完整的三次機會。
+  // 在這裡再歸零的話，「關掉再打開」會把累積的失敗洗掉，永遠湊不滿三次。
   if (feed.timer) {
     clearInterval(feed.timer);
     feed.timer = null;

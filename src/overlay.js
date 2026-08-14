@@ -595,9 +595,18 @@ export function mountOverlay(ctx) {
   //
   // 狀態存在 chrome.storage.local.globalFeed，content.js 的輪詢器與儀表板都聽同一把鑰匙，
   // 所以這裡撥一下，另外兩邊會立刻跟上，不會各說各話。
-  function paintFeed(on) {
+  async function paintFeed(on) {
     els.feedBox.checked = on;
     els.feedState.textContent = on ? '開啟中' : '關閉';
+    els.feedState.title = '';
+    if (on) return;
+    // 關著的話問一下是不是「自動關掉的」，是的話在這裡說一聲
+    const r = await ctx.sendAsync({ type: 'ia-cmd', cmd: 'feed-stats' });
+    const off = r && r.ok && r.off;
+    if (off) {
+      els.feedState.textContent = '已自動關閉';
+      els.feedState.title = `${off.reason}。遊戲改版把這個排行榜拿掉時就會這樣，詳情看儀表板「資料」頁。`;
+    }
   }
   els.feedBox.addEventListener('change', () => {
     const on = els.feedBox.checked;

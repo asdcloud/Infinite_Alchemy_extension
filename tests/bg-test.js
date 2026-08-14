@@ -234,6 +234,19 @@ check('沒有 tabId 的來源拿不到租約', res.r && res.r.granted === false,
 res = await send({ type: 'ia-cmd', cmd: 'feed-stats' }, dashSender);
 check('統計有累加', res.r && res.r.stats.polls >= 1 && res.r.stats.learned >= 3, JSON.stringify(res.r && res.r.stats));
 
+out.push('[輪詢自己收手時：關掉開關並留下原因]');
+const stored = [];
+window.chrome.storage = {
+  local: { set: (v) => { stored.push(v); return Promise.resolve(); } },
+  onChanged: { addListener() {} },
+};
+res = await send({ type: 'ia-cmd', cmd: 'feed-give-up', reason: '遊戲的回應裡已經沒有合成紀錄這個欄位' }, gameSender);
+check('有回覆', res.replied === true, JSON.stringify(res));
+check('把開關關掉', stored.some((v) => v.globalFeed === false), JSON.stringify(stored));
+res = await send({ type: 'ia-cmd', cmd: 'feed-stats' }, dashSender);
+check('原因記得住', res.r && res.r.off && /沒有合成紀錄/.test(res.r.off.reason), JSON.stringify(res.r && res.r.off));
+check('也記得是什麼時候關的', res.r.off.at > 0, String(res.r.off.at));
+
 out.push('[目標]');
 res = await send({ type: 'ia-cmd', cmd: 'goals' }, dashSender);
 check('一開始沒有目標', res.r && res.r.ok && res.r.items.length === 0, JSON.stringify(res.r));
