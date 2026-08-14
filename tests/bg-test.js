@@ -440,6 +440,28 @@ ghResponse = () => new Response(JSON.stringify({ tag_name: 'v9.9.9', prerelease:
 res = await send({ type: 'ia-cmd', cmd: 'check-update', opts: { force: true } }, dashSender);
 check('預發布不算新版本', res.r && res.r.hasUpdate === false, JSON.stringify(res.r));
 
+// 按「⟳ 更新」是使用者刻意的動作，一定要重查——不然這邊剛發了更新的一版，
+// 使用者在一小時的快取內再按一次，也只會看到舊的那一版。
+out.push('[再按一次更新：要看到更新的那一版，不是快取裡的舊版]');
+ghResponse = okRelease; // 先讓快取存著 9.9.9
+await send({ type: 'ia-sync-progress', phase: 'done', done: 1, total: 1, stats: {} }, gameSender);
+res = await send({ type: 'ia-cmd', cmd: 'check-update', opts: { cachedOnly: true } }, dashSender);
+check('快取裡先是 9.9.9', res.r && res.r.latest === '9.9.9', JSON.stringify(res.r));
+
+// 這邊發了更新的一版
+ghResponse = () => new Response(
+  JSON.stringify({ tag_name: 'v9.9.10', html_url: 'https://github.com/x/y/releases/tag/v9.9.10' }),
+  { status: 200 }
+);
+const callsBefore = ghCalls;
+broadcasts.length = 0;
+res = await send({ type: 'ia-sync-progress', phase: 'done', done: 1, total: 1, stats: {} }, gameSender);
+check('再按一次更新會重查（沒有被一小時的快取擋住）', ghCalls === callsBefore + 1, `${ghCalls} vs ${callsBefore}`);
+const doneMsg2 = broadcasts.filter((m) => m && m.type === 'ia-progress' && m.phase === 'done').pop();
+check('提示換成更新的那一版', doneMsg2 && doneMsg2.update.latest === '9.9.10', JSON.stringify(doneMsg2 && doneMsg2.update));
+res = await send({ type: 'ia-cmd', cmd: 'check-update', opts: { cachedOnly: true } }, dashSender);
+check('存下來的也跟著換新', res.r && res.r.latest === '9.9.10', JSON.stringify(res.r));
+
 ghResponse = okRelease;
 
 out.push('[content.js 只會打白名單上的端點]');

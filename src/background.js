@@ -865,8 +865,12 @@ async function handleSyncProgress(msg) {
     if (msg.phase === 'done') {
       const account = (await getMeta('account', null)) || {};
       await mergeAccountState(account.id, { lastSync: Date.now(), lastSyncStats: msg.stats || null });
-      // 順手看一眼 GitHub 上有沒有新版本；查不到就當沒這回事，不影響更新結果
-      update = await checkUpdate();
+      // 順手看一眼 GitHub 上有沒有新版本；查不到就當沒這回事，不影響更新結果。
+      //
+      // 這裡一定要 force：一小時的快取是給「開個頁面順手讀一下」用的，
+      // 但按「⟳ 更新」是使用者刻意的動作，而且三個入口都是點擊觸發、沒有自動排程。
+      // 不強制重查的話，我這邊剛發了更新的一版，你在一小時內再按也只會看到舊的那一版。
+      update = await checkUpdate({ force: true });
     }
   }
   // 廣播給儀表板／popup；content script 收不到 runtime 廣播，所以也回覆一份給它
