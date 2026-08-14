@@ -1239,8 +1239,11 @@ async function renderFeed() {
         }`
       : '尚未收集過';
 
-  // 自動關掉的話要說清楚是為什麼，不然使用者只會發現開關自己變回關閉
-  const off = (r && r.ok && r.off) || null;
+  // 自動關掉的話要說清楚是為什麼，不然使用者只會發現開關自己變回關閉。
+  //
+  // 但開關現在是開的就不要顯示——使用者自己重新打開時，背景那邊清掉這筆理由是非同步的，
+  // 不擋的話會出現「開關寫著開啟中、下面卻說已自動關閉」的矛盾畫面。
+  const off = (!$('feed-toggle').checked && r && r.ok && r.off) || null;
   const box = $('feed-off');
   box.classList.toggle('hidden', !off);
   if (off) {

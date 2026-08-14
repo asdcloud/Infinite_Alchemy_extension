@@ -96,6 +96,28 @@ sel.dispatchEvent(new Event('change'));
 await wait(200);
 out.push('切小號 → 素材櫃=' + txt('#bag-count') + ' / 軌跡=' + txt('#log-count') + ' / 共用配方表=' + txt('#kb-count'));
 
+// 全服動態收集：自動關閉的說明只在開關「關著」時才出現，
+// 不然使用者自己重新打開的當下會看到「開啟中」配上「已自動關閉」的矛盾畫面
+window.chrome.runtime.sendMessage = (m, cb) => {
+  if (typeof cb !== 'function') return;
+  if (m.cmd === 'feed-stats') {
+    cb({ ok: true, stats: { polls: 3, rows: 0, learned: 0, lastAt: Date.now() }, off: { at: Date.now(), reason: '遊戲的回應裡已經沒有合成紀錄這個欄位' } });
+    return;
+  }
+  cb({ ok: true, merged: 0, total: 0, report: 'diag' });
+};
+const feedOffShown = async (checked) => {
+  // 「重新整理」按下去之後有 1.2 秒的回饋期間是 disabled 的，要等它放開才點得動
+  while (document.getElementById('reload').disabled) await wait(100);
+  document.getElementById('feed-toggle').checked = checked;
+  document.getElementById('reload').click(); // 這顆會重跑 load() → renderAll() → renderFeed()
+  await wait(300);
+  return !document.getElementById('feed-off').classList.contains('hidden');
+};
+out.push('停用說明(開關關著) = ' + ((await feedOffShown(false)) ? '有顯示：' + txt('#feed-off').slice(0, 20) : '沒顯示（不對）'));
+out.push('停用說明(開關開著) = ' + ((await feedOffShown(true)) ? '還掛著（矛盾）' : '藏起來（正確）'));
+await wait(1300); // 等「重新整理」按鈕的回饋還原，免得影響後面
+
 // 版本提示：平常藏著，更新跑完帶回「有新版本」才浮出來
 const updBtn = document.getElementById('update-btn');
 out.push('版本提示(平常) = ' + (updBtn.classList.contains('hidden') ? '藏著' : '露出來了'));
